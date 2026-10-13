@@ -2,23 +2,45 @@
 
 **Find the hook. Clip the moment.** — a Wayin/Opus-style clip finder & clip maker for long videos.
 
-Paste a link → Clipppers pulls the transcript, scores every 15–60s window for
-virality, **grades the first-3-second hook of every clip separately** (that's what
-stops the scroll), ranks the key moments, and cuts real downloadable 9:16 MP4s.
+## ⚡ Open it fast
 
-![flow](https://img.shields.io/badge/link%20%E2%86%92%20transcript%20%E2%86%92%20moments%20%E2%86%92%20MP4-purple)
+**Option A — in your browser, zero install (GitHub Codespaces):**
+click **`< > Code` → Codespaces → Create codespace on main**, wait ~1 min, and the
+site opens automatically (port 8000 is forwarded for you — config in `.devcontainer/`).
 
-## Run it
+**Option B — on your computer, one command:**
+
+```bash
+python3 start.py        # Windows: double-click run.bat · creates .venv, installs, opens your browser
+```
+
+Then it's at **http://localhost:8000**. Prefer manual?
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
-# open http://localhost:8000
 ```
 
 No API keys. Transcripts come from the video's own captions (yt-dlp),
 cutting is done by ffmpeg (bundled via `imageio-ffmpeg` — no system install).
+
+## 💾 Your work is saved
+
+- Every trim, title, caption and style/quality choice **auto-saves as you type** —
+  refresh or close the tab and your last session is restored.
+- **My library** keeps saved projects/edits both in your browser (localStorage)
+  and on the server (`/api/projects`), with one-click reload, re-download,
+  delete, and **export/import of the whole library as JSON**.
+
+## 🎨 Caption styles & 📦 export quality
+
+Burned into the MP4 by ffmpeg (word timing estimated from the transcript):
+🟨 **Hormozi** (word-by-word yellow highlight) · 🔥 **MrBeast** (huge centred pop) ·
+🎤 **Karaoke** (cyan word sweep) · 💜 **Neon Pop** · ⬜ **Minimal** · 🎬 **Cinematic** — or none.
+
+Every export can be **1080p** (best), **720p** (balanced) or **480p** (small/fast),
+in 9:16 vertical or 16:9.
 
 ## What you get
 

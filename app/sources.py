@@ -67,7 +67,8 @@ def fetch_link(url: str) -> dict:
                        "(or upload a .srt/.vtt) and we'll find the moments from that."}
 
 
-def download_section(url: str, start: float, end: float, vertical: bool, out_dir: str) -> str:
+def download_section(url: str, start: float, end: float, vertical: bool, out_dir: str,
+                     quality: str = "720", caption_ass: str | None = None) -> str:
     """Download just [start,end] and cut it with ffmpeg. Returns file path."""
     from .clipper import ffmpeg_bin, cut
     with tempfile.TemporaryDirectory(dir=WORK) as td:

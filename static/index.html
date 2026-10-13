@@ -52,6 +52,17 @@
     </div>
   </section>
 
+  <section id="library">
+    <h2>💾 My library <small>— previous edits, auto-saved. Close the tab, come back, everything is here.</small></h2>
+    <div class="row options">
+      <button id="saveProjectBtn" class="ghost">💾 Save current edits as a project</button>
+      <button id="exportLibBtn" class="ghost">⬇ Export library (JSON)</button>
+      <label class="ghost file-label">⬆ Import library <input id="importLib" type="file" accept=".json" hidden></label>
+      <span id="saveStatus" class="muted"></span>
+    </div>
+    <div id="projectList" class="moments"></div>
+  </section>
+
   <section id="results" class="hidden">
     <div id="videoCard" class="video-card"></div>
     <div id="hookReport"></div>

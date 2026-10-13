@@ -56,3 +56,11 @@ details.transcript{font-size:13px}
 footer{text-align:center;color:var(--mut);padding:28px;font-size:13px;border-top:1px solid var(--line)}
 .check{display:flex;gap:6px;align-items:center;color:var(--mut)}
 a.dl{color:var(--good);font-weight:700}
+.editbox{background:#101020;border:1px dashed #3a3a5e;border-radius:12px;padding:12px;margin:12px 0}
+.editbox .row{margin-top:8px}.editbox label{color:var(--mut);font-size:13px;display:flex;gap:6px;align-items:center}
+.editbox input[type=number]{width:90px;padding:8px}.editbox select{padding:8px}
+.title-edit{width:100%;font-size:17px;font-weight:700;margin:8px 0 4px;padding:9px 11px}
+.caplabel{display:block;color:var(--mut);font-size:13px;margin-top:10px}.caplabel textarea{margin-top:5px}
+.libedit{background:#101020;border-radius:10px;padding:10px 12px;margin:8px 0;font-size:14px}
+.libedit a{color:var(--acc2);text-decoration:none}.libedit a:hover{text-decoration:underline}
+#library{margin-top:36px}
