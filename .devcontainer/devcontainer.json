@@ -1,0 +1,8 @@
+{
+  "name": "Clipppers",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "postCreateCommand": "pip install -r requirements.txt",
+  "forwardPorts": [8000],
+  "portsAttributes": { "8000": { "label": "Clipppers website", "onAutoForward": "openPreview" } },
+  "customizations": { "vscode": { "settings": { "python.defaultInterpreterPath": "/usr/local/bin/python" } } }
+}
