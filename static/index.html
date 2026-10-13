@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipppers — Find the hook. Clip the moment.</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✂️</text></svg>">
+</head>
+<body>
+<header>
+  <div class="logo">✂️ Clipppers</div>
+  <nav><span class="pill">No API key needed</span><a href="#how">How it works</a></nav>
+</header>
+
+<main>
+  <section class="hero">
+    <h1>Find the <span class="grad">hook</span>.<br>Clip the moment.</h1>
+    <p class="sub">Paste a link to any long video — podcast, stream, webinar, YouTube, TikTok, Twitch.
+      Clipppers reads the transcript, scores every moment for virality, grades its first-3-second
+      hook, and cuts ready-to-post vertical clips.</p>
+
+    <div class="analyzer-card">
+      <div class="url-row">
+        <input id="url" type="url" placeholder="Paste a video link…  https://youtube.com/watch?v=…" autofocus>
+        <button id="analyzeBtn" class="primary">⚡ Analyze video</button>
+      </div>
+      <div class="row options">
+        <label>Clip length
+          <select id="targetLen">
+            <option value="25">~25s · punchy</option>
+            <option value="38" selected>~38s · sweet spot</option>
+            <option value="55">~55s · story</option>
+          </select>
+        </label>
+        <button id="demoBtn" class="ghost">▶ Try the demo</button>
+        <label class="ghost file-label">⬆ Upload video / .srt
+          <input id="fileInput" type="file" accept="video/*,.srt,.vtt,.txt" hidden>
+        </label>
+      </div>
+      <details>
+        <summary>No captions on the video? Paste a transcript instead</summary>
+        <textarea id="transcript" rows="5" placeholder="Paste transcript here — with timestamps (00:12 …) if you have them, plain text works too."></textarea>
+      </details>
+      <div id="progress" class="progress hidden">
+        <div class="step" data-step="1">🔗 Reading link</div>
+        <div class="step" data-step="2">📝 Pulling transcript</div>
+        <div class="step" data-step="3">🎣 Scoring hooks &amp; moments</div>
+        <div class="step" data-step="4">🏆 Ranking clips</div>
+      </div>
+      <p id="error" class="error hidden"></p>
+    </div>
+  </section>
+
+  <section id="results" class="hidden">
+    <div id="videoCard" class="video-card"></div>
+    <div id="hookReport"></div>
+
+    <h2>🗺️ Moment map <small>— click a block to jump to that clip</small></h2>
+    <div id="timeline" class="timeline"></div>
+    <div class="legend"><span>Score:</span><i class="dot hot"></i> 85+ viral potential <i class="dot good"></i> 65+ strong <i class="dot ok"></i> 45+ decent</div>
+
+    <h2>🏆 Key moments <small id="momentCount"></small></h2>
+    <div class="row options">
+      <label>Sort
+        <select id="sortBy"><option value="rank">Virality score</option><option value="time">Timeline order</option><option value="hook">Hook strength</option></select>
+      </label>
+      <label>Filter
+        <select id="filterLabel"><option value="">All types</option></select>
+      </label>
+    </div>
+    <div id="moments" class="moments"></div>
+
+    <div class="manual card">
+      <h3>✂️ Manual clip cutter</h3>
+      <p class="muted">Know the exact moment? Cut any range from the analysed video / your upload.</p>
+      <div class="row">
+        <label>Start (sec) <input id="mStart" type="number" min="0" step="0.1" value="0"></label>
+        <label>End (sec) <input id="mEnd" type="number" min="1" step="0.1" value="30"></label>
+        <label class="check"><input id="mVertical" type="checkbox" checked> 9:16 vertical</label>
+        <button id="manualBtn" class="primary">✂️ Cut clip</button>
+      </div>
+      <p id="manualOut"></p>
+    </div>
+  </section>
+
+  <section id="how" class="how">
+    <h2>How it works</h2>
+    <div class="grid3">
+      <div class="card"><b>1 · Send a link 🔗</b><p>YouTube, TikTok, Twitch, podcasts or a direct file. We fetch the captions automatically — or paste a transcript / upload the video.</p></div>
+      <div class="card"><b>2 · We find the moments 🎣</b><p>Every 15–60s window is scored on hook strength, emotion, pace, numbers, questions and curiosity gaps. The first 3 seconds of each clip are graded separately — that's what stops the scroll.</p></div>
+      <div class="card"><b>3 · You post the clips ✂️</b><p>Preview in place, copy the title / caption / hashtags, grab hook rewrites, and download a real 9:16 MP4 cut by ffmpeg.</p></div>
+    </div>
+  </section>
+</main>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <button id="modalClose">✕</button>
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody"></div>
+  </div>
+</div>
+<div id="toast" class="toast hidden"></div>
+
+<footer>Clipppers · heuristic clip intelligence — works offline on transcripts, no AI key required · built with yt-dlp + ffmpeg</footer>
+<script src="app.js"></script>
+</body>
+</html>
