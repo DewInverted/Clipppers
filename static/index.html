@@ -8,9 +8,15 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✂️</text></svg>">
 </head>
 <body>
-<header>
-  <div class="logo">✂️ Clipppers</div>
-  <nav><span class="pill">No API key needed</span><a href="#how">How it works</a></nav>
+<header class="sticky-header">
+  <div class="header-inner">
+    <div class="logo">✂️ Clipppers</div>
+    <nav>
+      <span class="pill">No API key needed</span>
+      <a href="#how">How it works</a>
+      <a href="#library">Library</a>
+    </nav>
+  </div>
 </header>
 
 <main>
@@ -38,6 +44,17 @@
           <input id="fileInput" type="file" accept="video/*,.srt,.vtt,.txt" hidden>
         </label>
       </div>
+      <div class="row options">
+        <label class="check" title="Auto-snips um/uh/you know/sort of/… using audio silence detection">
+          <input id="fillersToggle" type="checkbox" checked> ✂ Auto-remove filler words
+        </label>
+        <label title="Blurred background keeps everything in frame (Shorts/TikTok default); Center-crop zooms to fill the screen">Framing
+          <select id="cropMode">
+            <option value="blur" selected>🫧 Blurred background (Shorts default)</option>
+            <option value="crop">🔍 Center-crop (zoomed fill)</option>
+          </select>
+        </label>
+      </div>
       <details>
         <summary>No captions on the video? Paste a transcript instead</summary>
         <textarea id="transcript" rows="5" placeholder="Paste transcript here — with timestamps (00:12 …) if you have them, plain text works too."></textarea>
@@ -52,6 +69,16 @@
     </div>
   </section>
 
+  <section id="discover">
+    <h2>🔥 Find viral clips by niche <small>— trending videos already getting views; click to analyse & clip them</small></h2>
+    <div class="row options" id="nicheRow"></div>
+    <div class="row">
+      <input id="discoverQ" type="text" placeholder="…or search any topic, e.g. 'andrew tate money mindset'" style="flex:1;min-width:220px">
+      <button id="discoverBtn" class="primary">🔍 Find videos</button>
+    </div>
+    <div id="discoverList" class="discover-grid"></div>
+  </section>
+
   <section id="library">
     <h2>💾 My library <small>— previous edits, auto-saved. Close the tab, come back, everything is here.</small></h2>
     <div class="row options">
@@ -60,7 +87,7 @@
       <label class="ghost file-label">⬆ Import library <input id="importLib" type="file" accept=".json" hidden></label>
       <span id="saveStatus" class="muted"></span>
     </div>
-    <div id="projectList" class="moments"></div>
+    <div id="projectList" class="moments lib-grid"></div>
   </section>
 
   <section id="results" class="hidden">
@@ -79,6 +106,8 @@
       <label>Filter
         <select id="filterLabel"><option value="">All types</option></select>
       </label>
+      <button class="primary" id="batchExportBtn" style="background:linear-gradient(90deg,#22c55e,#16a34a);white-space:nowrap">✂️ Export top 3 (auto-edited)</button>
+      <span class="muted" id="batchStatus" style="align-self:center"></span>
     </div>
     <div id="moments" class="moments"></div>
 
@@ -91,6 +120,7 @@
         <label class="check"><input id="mVertical" type="checkbox" checked> 9:16 vertical</label>
         <button id="manualBtn" class="primary">✂️ Cut clip</button>
       </div>
+      <div id="manualQualityWrap" class="row" style="display:none"></div>
       <p id="manualOut"></p>
     </div>
   </section>

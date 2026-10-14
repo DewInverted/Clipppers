@@ -10,58 +10,130 @@ from __future__ import annotations
 STYLES = {
     "hormozi":  dict(label="🟨 Hormozi — bold, word-by-word yellow highlight", font="DejaVu Sans", bold=1,
                      size=52, primary="&H00FFFFFF", highlight="&H0000E5FF", outline="&H00000000", back="&H00000000",
-                     border=6, shadow=2, align=2, margin_v=260, uppercase=True, word_by_word=True, chunk=3),
+                     border=6, shadow=2, align=2, margin_v=220, uppercase=True, word_by_word=True, chunk=3),
     "mrbeast":  dict(label="🔥 MrBeast — huge centred pop captions", font="DejaVu Sans", bold=1,
                      size=58, primary="&H00FFFFFF", highlight="&H0033CCFF", outline="&H00000000", back="&H80000000",
-                     border=7, shadow=0, align=5, margin_v=0, uppercase=True, word_by_word=False, chunk=3),
+                     border=7, shadow=0, align=2, margin_v=240, uppercase=True, word_by_word=False, chunk=3),
     "karaoke":  dict(label="🎤 Karaoke — word-by-word cyan sweep", font="DejaVu Sans", bold=1,
                      size=46, primary="&H88FFFFFF", highlight="&H00FFFF00", outline="&H00000000", back="&H00000000",
-                     border=5, shadow=1, align=2, margin_v=220, uppercase=False, word_by_word=True, chunk=4),
+                     border=5, shadow=1, align=2, margin_v=200, uppercase=False, word_by_word=True, chunk=4),
     "neon":     dict(label="💜 Neon Pop — magenta glow, centre screen", font="DejaVu Sans", bold=1,
                      size=48, primary="&H00FF66FF", highlight="&H00FFFF00", outline="&H00660066", back="&H00000000",
-                     border=4, shadow=3, align=5, margin_v=0, uppercase=True, word_by_word=False, chunk=3),
+                     border=4, shadow=3, align=2, margin_v=220, uppercase=True, word_by_word=False, chunk=3),
     "minimal":  dict(label="⬜ Minimal — clean small white, bottom", font="DejaVu Sans", bold=0,
                      size=36, primary="&H00FFFFFF", highlight="&H00FFFFFF", outline="&H00000000", back="&H90000000",
-                     border=2, shadow=0, align=2, margin_v=110, uppercase=False, word_by_word=False, chunk=5),
+                     border=2, shadow=0, align=2, margin_v=140, uppercase=False, word_by_word=False, chunk=5),
     "cinematic": dict(label="🎬 Cinematic — elegant lower-third", font="DejaVu Serif", bold=0,
                      size=38, primary="&H00F5F5F5", highlight="&H00F5F5F5", outline="&H00000000", back="&H00000000",
-                     border=2, shadow=1, align=1, margin_v=90, uppercase=False, word_by_word=False, chunk=6),
+                     border=2, shadow=1, align=1, margin_v=120, uppercase=False, word_by_word=False, chunk=6),
 }
 
 STYLE_CHOICES = ["none"] + list(STYLES)
 
 
 def _ts(sec: float) -> str:
+    # Clamp small negatives from rounding to 0
+    sec = max(0.0, float(sec))
     h = int(sec // 3600); m = int(sec % 3600 // 60); s = sec % 60
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
 def build_ass(text: str, duration: float, style_key: str, out_path: str,
-              width: int = 720, height: int = 1280) -> str:
-    st = STYLES[style_key]
+              width: int = 720, height: int = 1280,
+              word_timings: list | None = None,
+              font_size: int | None = None,
+              margin_v: int | None = None) -> str:
+    """Build an ASS subtitle file.
+
+    If word_timings is passed, it's a list of (start_sec_from_clip_start,
+    end_sec_from_clip_start, word) — used to get accurate per-chunk timing
+    instead of an even split across the whole clip. This fixes captions
+    that drift or say the wrong thing because of pauses / music / gaps.
+
+    font_size / margin_v let callers override per-export (so users can
+    resize / reposition captions without editing styles.py).
+    """
+    st = dict(STYLES[style_key])
+    if font_size is not None:
+        st["size"] = int(font_size)
+    if margin_v is not None:
+        st["margin_v"] = int(margin_v)
     words = [w for w in (text or "").replace("\n", " ").split() if w.strip()]
     if not words:
         raise ValueError("No caption text for that range — analyse with a transcript first, "
                          "or type caption text in the manual cutter.")
     if st["uppercase"]:
         words = [w.upper() for w in words]
+
     chunk = st["chunk"]
-    groups = [words[i:i + chunk] for i in range(0, len(words), chunk)]
-    per_word = duration / max(1, len(words))
-    events, clock = [], 0.0
-    for group in groups:
-        g_dur = per_word * len(group)
-        if st["word_by_word"]:
-            # one event per word, current word recoloured (Hormozi/karaoke look)
-            for wi, word in enumerate(group):
-                shown = " ".join(
-                    (f"{{\\1c{st['highlight']}\\b1}}{w}{{\\r}}" if j == wi else w)
-                    for j, w in enumerate(group))
-                events.append((clock, clock + per_word, shown))
-                clock += per_word
-        else:
-            events.append((clock, clock + g_dur, " ".join(group)))
-            clock += g_dur
+    GAP = 0.04  # 40ms gap between caption groups to prevent overlap flash
+
+    # Build chunk-level (start, end, text) from either precise word timings
+    # or an even split fallback.
+    if word_timings and len(word_timings) >= len(words):
+        # Use provided timings — already clip-relative seconds
+        wt = [(max(0.0, s), max(0.0, e), w) for s, e, w in word_timings[:len(words)]]
+        # Uppercase if needed
+        if st["uppercase"]:
+            wt = [(s, e, w.upper()) for s, e, w in wt]
+        # Ensure monotonic non-overlap: cap each word's end to the next word's start
+        for i in range(len(wt) - 1):
+            s, e, w = wt[i]
+            ns = wt[i+1][0]
+            if e > ns:
+                e = ns - 0.005  # tiny safety gap
+            wt[i] = (s, max(s + 0.08, e), w)
+        # Re-cap last word
+        s, e, w = wt[-1]
+        wt[-1] = (s, min(duration, max(s + 0.08, e)), w)
+
+        events = []
+        for gi in range(0, len(wt), chunk):
+            group = wt[gi:gi + chunk]
+            g_start = group[0][0]
+            g_end = group[-1][1]
+            # Ensure no gap between groups is negative (start of this group must be >= end of last event)
+            if events and g_start < events[-1][1] + 0.001:
+                g_start = events[-1][1] + 0.001
+            if st["word_by_word"]:
+                for wi, (ws, we, w) in enumerate(group):
+                    # This word shows from its own start until the next word
+                    # starts (or we), with a small GAP at end of group.
+                    if wi + 1 < len(group):
+                        w_end = group[wi+1][0] - 0.005
+                    else:
+                        w_end = we
+                    w_dur = max(0.10, w_end - ws)
+                    shown = " ".join(
+                        (f"{{\\1c{st['highlight']}\\b1}}{gw}{{\\r}}" if j == wi else gw)
+                        for j, (_, _, gw) in enumerate(group))
+                    # Start slightly after previous word's end to avoid overlap
+                    w_start = ws
+                    if events and w_start < events[-1][1] + 0.001:
+                        w_start = events[-1][1] + 0.001
+                    w_end = w_start + w_dur
+                    events.append((w_start, min(duration, w_end), shown))
+            else:
+                events.append((g_start, min(duration, g_end), " ".join(w for _, _, w in group)))
+    else:
+        # Fallback even split (used for manual cutter / when no timings available).
+        per_word = duration / max(1, len(words))
+        groups = [words[i:i + chunk] for i in range(0, len(words), chunk)]
+        events, clock = [], 0.0
+        for group in groups:
+            g_dur = per_word * len(group) - GAP
+            if st["word_by_word"]:
+                wpw = per_word - 0.005
+                for wi, word in enumerate(group):
+                    shown = " ".join(
+                        (f"{{\\1c{st['highlight']}\\b1}}{w}{{\\r}}" if j == wi else w)
+                        for j, w in enumerate(group))
+                    events.append((clock, clock + wpw, shown))
+                    clock += wpw
+                clock += GAP
+            else:
+                events.append((clock, clock + g_dur, " ".join(group)))
+                clock += g_dur + GAP
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
