@@ -50,14 +50,22 @@ QUALITIES = {
 
 # Resolve (w,h) per quality tier + platform. For non-1080 tiers, scale the
 # native 1080p canvas so its longer side matches the tier (720 or 480).
+# Always return EVEN dimensions (h264 requires this; -2 in ffmpeg rounds
+# one axis which was giving us 404x720 instead of 406x720 on tiktok-720p).
 def _res(platform: str, quality: str) -> tuple[int, int]:
     pw, ph = ASPECTS.get(platform, ASPECTS["tiktok"])
     q = quality if quality in QUALITIES else "720"
     if q == "1080":
-        return (pw, ph)
-    long_side = 720 if q == "720" else 480
-    native_long = max(pw, ph)
-    return (round(pw * long_side / native_long), round(ph * long_side / native_long))
+        w, h = pw, ph
+    else:
+        long_side = 720 if q == "720" else 480
+        native_long = max(pw, ph)
+        w = round(pw * long_side / native_long)
+        h = round(ph * long_side / native_long)
+    # Snap to even
+    w += w % 2
+    h += h % 2
+    return (w, h)
     return (pw * 480 // (ph if pw >= ph else pw), ph * 480 // (ph if pw >= ph else pw))
 
 # Target integrated loudness per platform (LUFS). ffmpeg loudnorm is used to
@@ -131,10 +139,44 @@ def _build_filter(w: int, h: int, crop_mode: str,
             f"scale={w}:{h}:flags=lanczos,setsar=1[vframed];"
         )
     elif mode == "black":
-        # Letterbox/pillarbox on pure black (cinematic, no blur)
+        # BLACK BARS — video fills FULL WIDTH of the canvas, pure black
+        # strips only on the top + bottom (NEVER side pillars). Tall
+        # sources are center-cropped vertically so they don't become
+        # narrow. Short/wide sources get black top+bottom letterbox.
+        # Use force_original_aspect_ratio=decrease to fit within the
+        # canvas, then pad black to exact w x h vertically: since width
+        # is already locked to w (because we're fitting to a w x h box
+        # with a source that's >= width-proportionally when wide, or
+        # < width when tall), we add a pre-scale to w:-2 for tall
+        # sources so width is always exactly w before padding.
+        # Simpler trick: scale with decrease, then pad. If width came
+        # out < w (tall source scaled to hit height), pad horizontally
+        # is unwanted — so handle tall vs wide with split scale:
         parts.append(
-            f"[vt]scale={w}:{h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[vframed];"
+            f"[vt]split=2[srcwide][srctall];"
+            # Wide-or-equal: fit into box (hits width = w), pad to h
+            f"[srcwide]scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black[wide];"
+            # Tall: force width = w (auto-crop sides don't happen;
+            # height overfills), then crop center vertically to h
+            f"[srctall]scale={w}:-2:flags=lanczos,"
+            f"crop={w}:{h}:0:(ih-{h})/2[tall];"
+            # Pick whichever branch matches by checking source aspect
+            f"[vt]null[src];"
+        )
+        # Hmm, the concat trick above is overcomplicated. Do it in ONE
+        # scale+pad chain using eval expressions:
+        parts.pop()  # remove failed attempt
+        parts.append(
+            # Scale so width = exactly w, height proportional;
+            # then pad to w x h with black (centered vertically).
+            # Because width is FORCED to w, x offset is always 0 — black
+            # appears only top/bottom. If scaled height > h, the pad
+            # output is still h tall and ffmpeg crops overflow? No, pad
+            # doesn't crop. So pre-crop if over height.
+            f"[vt]scale={w}:-2:flags=lanczos,setsar=1,"
+            f"crop=iw:'min(ih,{h})':0:'max(0,(ih-{h})/2)',setsar=1,"
+            f"pad={w}:{h}:0:'max(0,({h}-ih)/2)':color=black,setsar=1[vframed];"
         )
     elif mode == "blur":
         parts.append(

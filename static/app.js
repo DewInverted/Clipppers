@@ -250,9 +250,9 @@ function renderMoments(){
         </label>
         <label>📐 Framing
           <select onchange="editField(${i},'crop_mode',this.value)">
-            <option value="blur"${e.crop_mode==='blur'?' selected':''}>🫧 Blurred BG (classic short)</option>
+            <option value="blur"${e.crop_mode==='blur'?' selected':''}>🫧 Blurred BG (TikTok default)</option>
             <option value="zoom"${e.crop_mode==='zoom'?' selected':''}>🔍 Zoom & crop (fills frame)</option>
-            <option value="black"${e.crop_mode==='black'?' selected':''}>⬛ Black bars (cinematic)</option>
+            <option value="black"${e.crop_mode==='black'?' selected':''}>⬛ Black bars (top+bottom only, full width)</option>
           </select>
         </label>
       </div>

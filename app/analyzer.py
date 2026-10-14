@@ -275,6 +275,14 @@ def score_window(segs: list[dict], duration_hint: float) -> dict:
     conflict = sum(1 for x in w if x in CONFLICT)
     transforms = sum(1 for x in w if x in TRANSFORM)
     story = sum(1 for x in w if x in STORY)
+    # STORY PAYOFF: a story without a twist/payoff/resolution is just rambling.
+    # Require at least one of: reveal/turn/ending/result marker, otherwise
+    # heavily discount the story score.
+    payoff = len(re.findall(r"\b(then (he|she|they|it|i) (said|told|did|went|showed|pulled)|turns out|ended up|realized|discovered|found out|shocked|stunned|couldn'?t believe|that'?s when|next thing|all of a sudden|suddenly|turns out|revealed|turn out|plot twist|the kicker|punchline|but then|turn around|became|was wrong|got caught|turned around|you wont believe|you won't believe)\b", low))
+    # "And then" / "so then" rambling penalty — pure sequential narration
+    # with no substance is boring. Count story markers that aren't backed
+    # up by conflict/reveal/payoff and penalize.
+    ramble = len(re.findall(r"\b(and then|so then|then i|then we|then he|then she)\b", low))
     # Specific numbers with units — these *always* outperform vague claims
     nums = len(re.findall(r"\b\d{1,3}(?:,\d{3})?(?:\.\d+)?\s?(?:k|m|million|billion|%|percent|dollars|bucks|days|months|years|hours|minutes|seconds|pounds|kg|lbs|ft|miles|km|steps|ways|things|reasons|tips)\b", low))
     money = len(re.findall(r"\$\s?\d|\b\d+\s?(?:k|m|million|billion|grand|bucks|dollars)\b", low))
@@ -295,7 +303,9 @@ def score_window(segs: list[dict], duration_hint: float) -> dict:
              + min(28, interrupts * 4.0)      # pattern interrupt = viral
              + min(20, conflict * 3.5)        # stakes / drama
              + min(12, transforms * 2.0)      # before/after
-             + min(10, story * 1.5)           # story beats
+             + min(16, payoff * 4.0)          # story payoff / twist / reveal
+             + min(10, story * 1.5)           # story beats (only paid if payoff exists)
+             - max(0, min(20, (ramble - payoff - 2) * 6))  # penalize rambling "and then I went…"
              + min(14, nums * 3.0)            # specific numbers
              + min(16, money * 4.0)           # money talk
              + min(10, you * 1.5)             # direct address
@@ -304,6 +314,10 @@ def score_window(segs: list[dict], duration_hint: float) -> dict:
              + min(8, uniq * 12)
              + min(10, punct)
              + min(14, laugh))
+    # Story-without-payoff penalty: if there are story markers but zero
+    # payoff (just "i went to … and then we … then he …"), it's rambling.
+    if story >= 2 and payoff == 0 and conflict < 2 and interrupts < 2:
+        score -= 30
     # completeness bonus: ends on a sentence boundary
     if text.strip().endswith((".", "!", "?")):
         score += 4

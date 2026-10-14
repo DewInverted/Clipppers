@@ -104,7 +104,7 @@ class ClipIn(BaseModel):
     platform: str = "tiktok"      # tiktok | shorts | reels | story | ig_square | ig_portrait | youtube | horizontal
 
 
-VERSION = "1.5.3"
+VERSION = "1.5.4"
 
 
 @app.get("/api/health")
