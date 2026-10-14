@@ -119,14 +119,24 @@ def _build_filter(w: int, h: int, crop_mode: str,
         f"loudnorm=I={lufs}:TP=-1:LRA=11[at];"
     )
     # 2) Framing [vt] -> [vframed]
-    if crop_mode == "crop":
-        # crop to exact target aspect first, then scale
+    # Normalize mode: accept "crop" (old name) as alias for "zoom"
+    mode = crop_mode
+    if mode == "crop":
+        mode = "zoom"
+    if mode == "zoom":
+        # Zoom & center-crop to fill the target canvas exactly (no bars, no blur)
         parts.append(
             f"[vt]crop='if(gt(iw/ih,{target_ar}),ih*{target_ar},iw)':"
             f"'if(gt(iw/ih,{target_ar}),ih,iw/({target_ar}))',"
             f"scale={w}:{h}:flags=lanczos,setsar=1[vframed];"
         )
-    elif crop_mode == "blur":
+    elif mode == "black":
+        # Letterbox/pillarbox on pure black (cinematic, no blur)
+        parts.append(
+            f"[vt]scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[vframed];"
+        )
+    elif mode == "blur":
         parts.append(
             f"[vt]split=2[bg][fg];"
             f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,"
@@ -134,10 +144,13 @@ def _build_filter(w: int, h: int, crop_mode: str,
             f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease,setsar=1[fgfit];"
             f"[bgblur][fgfit]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1[vframed];"
         )
-    else:  # fit with black bars
+    else:  # fallback = blur
         parts.append(
-            f"[vt]scale={w}:{h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1[vframed];"
+            f"[vt]split=2[bg][fg];"
+            f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},boxblur=20:2,setsar=1[bgblur];"
+            f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease,setsar=1[fgfit];"
+            f"[bgblur][fgfit]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1[vframed];"
         )
     # 3) Subtitles on [vframed] -> [vout]
     if caption_ass:

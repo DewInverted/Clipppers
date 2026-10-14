@@ -32,17 +32,27 @@ HOOK_OPENERS = [
     (r"\b(until|before|after) (i|you|we)\b", 8, "Before/after transformation"),
     (r"\b(not|don'?t|never|no)\b", 6, "Negation — contrarian tension"),
 ]
-EMOTION = set("love hate crazy insane wild amazing shocked shock unbelievable incredible stupid brilliant genius afraid fear angry happy sad funny hilarious ridiculous obsessed addicted embarrassed proud regret mistake fail failed failure win won lose lost money rich broke free secret hidden truth lie destroy ruined perfect worst best".split())
-POWER = set("prove proven exactly actually literally seriously honestly frankly finally suddenly immediately instantly step steps framework system method formula reason reasons because so therefore result results grow growth scale sell sales profit revenue audience viral hook retain retention algorithm".split())
+EMOTION = set("love hate crazy insane wild amazing shocked shock unbelievable incredible stupid brilliant genius afraid fear angry happy sad funny hilarious ridiculous obsessed addicted embarrassed proud regret mistake fail failed failure win won lose lost money rich broke free secret hidden truth lie destroy ruined perfect worst best insane absurd mind-blowing mindblowing mindblown disgusting nasty savage brutal destroyed wrecked ruined awkward cringe insane bizarre weird strange odd shocking disgusting awful terrible horrible amazing awesome epic legendary iconic iconic".split())
+POWER = set("prove proven exactly actually literally seriously honestly frankly finally suddenly immediately instantly step steps framework system method formula reason reasons because so therefore result results grow growth scale sell sales profit revenue audience viral hook retain retention algorithm reveal revealed exposing exposed exposed caught caught red-handed proof evidence data study research numbers percent statistic".split())
+# Pattern-interrupt words/phrases — these are the words that MAKE people
+# stop scrolling. Weighted heavily because boring "tips" clips don't go viral.
+PATTERN_INTERRUPT = set("stop wait listen hold never always nobody everyone wrong truth lie myth secret exposed caught proof disgusting illegal scam banned cancel canceled cancelled destroy destroyed ruined wrecked shocking insane wild crazy absurd unbelievable literally actually honestly reality wake regret embarrassing awkward cringe brutal savage".split())
+# Conflict / stakes / consequences — moments where something is at stake
+CONFLICT = set("fight argument sued arrest arrested police fired fired lost court judge sued lawyer scam fraud stole stolen cheated lie lied lying caught exposed ruined destroyed broke broken bankrupt debt million thousand dollars money cash profit revenue risk dangerous illegal".split())
+# Before/after / transformation words — story fuel
+TRANSFORM = set("before after until used to thought was would became turned out happened changed realized discovered found out ended up lost gained".split())
+# Personal story markers
+STORY = set("story happened one day remember when i years ago back then once time morning night guy girl friend client customer boss".split())
 STOPWORDS = set("the a an and or but if then else for to of in on at by with is are was were be been it its this that these those i you he she we they my your his her our their me him us them as so just like really very".split())
 
 LABELS = [
-    ("Hot Take", r"\b(unpopular opinion|truth is|nobody|no one|everyone is wrong|stop .*ing|don'?t)\b"),
-    ("Funny", r"(\[laughter\]|\(laughter\)|\bhaha|\blol\b|😂|🤣)"),
-    ("Story", r"\b(so (one day|then)|i remember|when i was|years ago|turns out|long story)\b"),
-    ("Insight", r"\b(because|the reason|that'?s why|what (i|we) learned|framework|step|method)\b"),
-    ("Money", r"(\$|\b\d+\s?(k|m|million|billion)\b|\bmoney\b|\brevenue\b|\bprofit\b)"),
-    ("Controversy", r"\b(cancel|banned|illegal|scam|lie|lying|exposed|controversial)\b"),
+    ("Controversy", r"\b(cancel|banned|illegal|scam|lie|lying|exposed|controversial|cringe|awful|disgusting|sue|fired)\b"),
+    ("Story", r"\b(so (one day|then)|i remember|when i was|years ago|turns out|long story|one time|story time|let me tell)\b"),
+    ("Hot Take", r"\b(unpopular opinion|truth is|nobody|no one|everyone is wrong|stop .*ing|don'?t|here'?s the thing|hot take)\b"),
+    ("Funny", r"(\[laughter\]|\(laughter\)|\bhaha|\blol\b|😂|🤣|\bfunny\b|\bjoke\b)"),
+    ("Money", r"(\$|\b\d+\s?(k|m|million|billion)\b|\bmoney\b|\brevenue\b|\bprofit\b|\bcost\b|\bspent\b|\bmade\b)"),
+    ("Reveal", r"\b(turns out|found out|realized|discovered|secret|hidden|nobody tells|truth|exposed)\b"),
+    ("Insight", r"\b(because|the reason|that'?s why|what (i|we) learned|framework|step|method|here'?s how|tip)\b"),
 ]
 
 # Topic → keyword sets for the "find me every moment about X" scanner.
@@ -254,24 +264,55 @@ def _label(text: str) -> str:
 
 def score_window(segs: list[dict], duration_hint: float) -> dict:
     text = " ".join(s["text"] for s in segs)
+    low = text.lower()
     w = _words(text)
     secs = max(1.0, segs[-1]["end"] - segs[0]["start"])
     wpm = len(w) / secs * 60
     uniq = len(set(w) - STOPWORDS) / max(1, len(w))
     emotion = sum(1 for x in w if x in EMOTION)
     power = sum(1 for x in w if x in POWER)
+    interrupts = sum(1 for x in w if x in PATTERN_INTERRUPT)
+    conflict = sum(1 for x in w if x in CONFLICT)
+    transforms = sum(1 for x in w if x in TRANSFORM)
+    story = sum(1 for x in w if x in STORY)
+    # Specific numbers with units — these *always* outperform vague claims
+    nums = len(re.findall(r"\b\d{1,3}(?:,\d{3})?(?:\.\d+)?\s?(?:k|m|million|billion|%|percent|dollars|bucks|days|months|years|hours|minutes|seconds|pounds|kg|lbs|ft|miles|km|steps|ways|things|reasons|tips)\b", low))
+    money = len(re.findall(r"\$\s?\d|\b\d+\s?(?:k|m|million|billion|grand|bucks|dollars)\b", low))
     punct = text.count("!") * 3 + text.count("?") * 2
-    laugh = len(re.findall(r"laughter|applause|cheering", text.lower())) * 10
+    laugh = len(re.findall(r"laughter|applause|cheering", low)) * 10
+    # Direct address "you/your" — speaking TO the viewer
+    you = len(re.findall(r"\byou(?:r|'?re|'?ve|'?ll)?\b", low))
+    # Negation / contrast ("but", "however", "actually") — drives tension
+    contrast = len(re.findall(r"\b(but|however|actually|wait|hold on|except|unless|instead|turns out|the problem|the truth is|here'?s the thing)\b", low))
     hook = hook_analysis(segs[0]["text"] + " " + (segs[1]["text"] if len(segs) > 1 else ""))
-    # pace: 130-185 wpm is the short-form sweet spot
-    pace_pts = 15 - min(15, abs(wpm - 158) / 6)
-    score = (hook["score"] * 0.38 + min(20, emotion * 2.2) + min(14, power * 1.1)
-             + pace_pts + min(10, uniq * 16) + min(10, punct) + min(12, laugh))
+    # pace: 135-175 wpm is the short-form sweet spot
+    pace_pts = 12 - min(12, abs(wpm - 155) / 7)
+    # Weighting — pattern interrupts, conflict, and YOU-address dominate
+    # because boring generic tips never go viral. Hooks are 35% of score.
+    score = (hook["score"] * 0.35
+             + min(22, emotion * 2.4)
+             + min(14, power * 1.0)
+             + min(28, interrupts * 4.0)      # pattern interrupt = viral
+             + min(20, conflict * 3.5)        # stakes / drama
+             + min(12, transforms * 2.0)      # before/after
+             + min(10, story * 1.5)           # story beats
+             + min(14, nums * 3.0)            # specific numbers
+             + min(16, money * 4.0)           # money talk
+             + min(10, you * 1.5)             # direct address
+             + min(8, contrast * 2.0)         # tension/contrast
+             + pace_pts
+             + min(8, uniq * 12)
+             + min(10, punct)
+             + min(14, laugh))
     # completeness bonus: ends on a sentence boundary
     if text.strip().endswith((".", "!", "?")):
-        score += 5
+        score += 4
+    # Penalty: empty filler windows with no real content
+    content_words = [x for x in w if x not in STOPWORDS and len(x) > 2]
+    if len(content_words) < 8:
+        score -= 25
     return {"score": round(max(3, min(99, score))), "hook": hook, "wpm": round(wpm),
-            "emotion_hits": emotion, "label": _label(text)}
+            "emotion_hits": emotion + interrupts, "label": _label(text)}
 
 
 def _title(text: str) -> str:

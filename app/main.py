@@ -104,7 +104,7 @@ class ClipIn(BaseModel):
     platform: str = "tiktok"      # tiktok | shorts | reels | story | ig_square | ig_portrait | youtube | horizontal
 
 
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 
 
 @app.get("/api/health")
@@ -248,13 +248,17 @@ def discover(q: str = "", niche: str = "", count: int = 8):
     # "Unsupported url scheme: ytsearchshortsN"). We run regular ytsearch and
     # filter Shorts vs long-form on the results by looking for /shorts/ URLs
     # and aspect ratio metadata.
-    raw_q = re.sub(r"^ytsearch\w*\d*:", "", query)
+    raw_q = re.sub(r"^ytsearch\w*\d*:", "", query).strip()
+    # Stack multiple viral / high-intent phrasings so we don't just get boring
+    # top-level tutorial/explainer videos. Mixes shorts + drama + story + how-to.
     strategies = [
-        f"ytsearch{n}:{raw_q}",
-        f"ytsearch{n}:{raw_q} viral",
         f"ytsearch{n}:{raw_q} #shorts",
-        f"ytsearch{n}:{raw_q} tips",
-        f"ytsearch{n}:{raw_q} 2025",
+        f"ytsearch{n}:{raw_q} exposed",
+        f"ytsearch{n}:{raw_q} crazy story",
+        f"ytsearch{n}:{raw_q} you won't believe",
+        f"ytsearch{n}:{raw_q} the truth about",
+        f"ytsearch{n}:{raw_q} tips that actually work",
+        f"ytsearch{n}:{raw_q}",
     ]
     last_err = None
     info = None
@@ -514,7 +518,7 @@ def make_clip(body: ClipIn):
         # fillers on/off / caption style changed).
         nonce = uuid.uuid4().hex[:6]
         tag = f"{int(body.start)}_{int(body.end)}_{'v' if body.vertical else 'h'}_{body.quality}_{body.caption_style}_{nonce}"
-        crop_mode = body.crop_mode if body.crop_mode in ("blur", "crop") else "blur"
+        crop_mode = body.crop_mode if body.crop_mode in ("blur", "crop", "zoom", "black") else "blur"
         # Compute accurate per-word timings (using real source segment times,
         # clip-relative) so captions line up with speech.
         word_timings = _compute_word_timings(body)
