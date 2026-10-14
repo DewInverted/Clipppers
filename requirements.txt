@@ -1,5 +1,5 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
-yt-dlp>=2024.4.9
+yt-dlp>=2025.3.31
 imageio-ffmpeg>=0.4.9
 python-multipart>=0.0.9

@@ -176,7 +176,7 @@ def analyze_transcript(segments: list[dict], meta: dict | None = None,
             "score": c["score"], "label": c["label"], "wpm": c["wpm"],
             "hook": c["hook"], "title": _title(text),
             "caption": f"{_title(text)} 👀\n\n" + " ".join(_hashtags(text)),
-            "hashtags": _hashtags(text), "transcript": text[:600],
+            "hashtags": _hashtags(text), "transcript": text[:3000],
             "why": _why(c)})
     moments.sort(key=lambda m: m["rank"])
     opening = hook_analysis(" ".join(s["text"] for s in segments[:4]))
@@ -195,9 +195,35 @@ def _why(c: dict) -> list[str]:
 
 
 def parse_captions(raw: str) -> list[dict]:
-    """Parse .vtt / .srt / plain 'mm:ss text' transcripts, de-dupe YouTube rolling captions."""
+    """Parse .vtt / .srt / .ttml / youtube .json3 / plain 'mm:ss text' transcripts, de-dupe YouTube rolling captions."""
     raw = raw.strip()
     segs: list[dict] = []
+
+    # Try JSON3 (YouTube's native caption format — yt-dlp often delivers this)
+    try:
+        import json as _json
+        if raw.lstrip().startswith(("{","[")):
+            j = _json.loads(raw)
+            events = j.get("events") if isinstance(j, dict) else None
+            if events:
+                for ev in events:
+                    t_start = ev.get("tStartMs")
+                    dur = ev.get("dDurationMs", 0)
+                    segs_utf8 = ev.get("segs") or []
+                    text = "".join(s.get("utf8","") for s in segs_utf8).strip()
+                    # Skip non-speech events (newlines, music markers) and blank lines
+                    if t_start is None or not text or text in ("\n","\r\n"):
+                        continue
+                    # Clean YouTube annotation tokens like [Music], [Applause]
+                    text = _clean_caption_text(text)
+                    if text:
+                        segs.append({"start": t_start/1000.0,
+                                     "end": (t_start + dur)/1000.0 if dur else t_start/1000.0 + 2.0,
+                                     "text": text})
+                if segs:
+                    return _dedup(segs)
+    except Exception:
+        pass
 
     def ts(t: str) -> float:
         t = t.replace(",", ".")
@@ -207,28 +233,93 @@ def parse_captions(raw: str) -> list[dict]:
     blocks = re.split(r"\n\s*\n", raw)
     timed = False
     for b in blocks:
-        m = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}|\d{1,2}:\d{2}(?::\d{2})?)\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}|\d{1,2}:\d{2}(?::\d{2})?)", b)
+        m = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?[.,]\d{1,3}|\d{1,2}:\d{2}(?::\d{2})?)\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?[.,]\d{1,3}|\d{1,2}:\d{2}(?::\d{2})?)", b)
         if m:
             timed = True
             text = b[m.end():]
-            text = re.sub(r"<[^>]+>|\d+\s*$", " ", text, flags=re.M)
+            # Strip HTML/XML tags (cues like <c>, <00:00:00.000>, <i>, {an8} alignment)
+            text = re.sub(r"<[^>]+>", " ", text, flags=re.M)
+            # Strip SRT cue numbers (bare lines of digits at end of cue)
+            text = re.sub(r"^\s*\d+\s*$", " ", text, flags=re.M)
             text = re.sub(r"\s+", " ", text).strip()
+            text = _clean_caption_text(text)
             if text:
                 segs.append({"start": ts(m.group(1)), "end": ts(m.group(2)), "text": text})
-    if not timed:  # plain text: fake timestamps, ~2.6 words/sec
-        words, t = raw.split(), 0.0
-        for i in range(0, len(words), 18):
-            chunk = " ".join(words[i:i + 18])
-            segs.append({"start": t, "end": t + len(chunk.split()) / 2.6, "text": chunk})
-            t += len(chunk.split()) / 2.6
-    # de-dupe rolling auto-captions (each line repeats the previous one)
+            continue
+        # TTML / SAMI: try <p begin="..." end="...">text</p>
+        for pm in re.finditer(r'<p[^>]*\b(?:begin|start)="([^"]+)"[^>]*\b(?:end|dur)="([^"]+)"[^>]*>(.*?)</p>', b, flags=re.S|re.I):
+            timed = True
+            try:
+                s = ts(_ttml_ts(pm.group(1))); e = ts(_ttml_ts(pm.group(2)))
+                text = re.sub(r"<[^>]+>", " ", pm.group(3))
+                text = re.sub(r"\s+", " ", text).strip()
+                text = _clean_caption_text(text)
+                if text:
+                    segs.append({"start": s, "end": e, "text": text})
+            except Exception:
+                continue
+
+    if not timed:
+        # Strip noisy "mm:ss[.cc] seconds" lead-ins that show up when a non-VTT
+        # caption blob (e.g. YouTube srv1/srv2 text) falls through to plain text.
+        cleaned = re.sub(r"\d{1,2}:\d{2,3}(?:\.\d+)?\s*seconds", " ", raw)
+        cleaned = _clean_caption_text(cleaned)
+        words = cleaned.split()
+        if words:
+            t = 0.0
+            for i in range(0, len(words), 18):
+                chunk = " ".join(words[i:i + 18])
+                segs.append({"start": t, "end": t + len(chunk.split()) / 2.6, "text": chunk})
+                t += len(chunk.split()) / 2.6
+
+    return _dedup(segs)
+
+
+def _ttml_ts(s: str) -> str:
+    """Normalise TTML/SAMI time '00:00:02.200' / '2.2s' / '00:00:02:200' to HH:MM:SS.mmm."""
+    s = s.strip().rstrip("s").replace(",", ".")
+    if re.match(r"^\d+(\.\d+)?$", s):
+        # just seconds
+        v = float(s); h=int(v//3600); m=int((v%3600)//60); sec=v%60
+        return f"{h}:{m:02d}:{sec:06.3f}"
+    # colon-separated; convert last separator from ':' to '.' if it looks like frames/ms
+    parts = s.split(":")
+    if len(parts) == 4:
+        # HH:MM:SS:ff
+        return f"{parts[0]}:{parts[1]}:{parts[2]}.{parts[3]}"
+    if len(parts) == 3 and "." not in parts[2]:
+        return f"{parts[0]}:{parts[1]}:{parts[2]}.000"
+    return s
+
+
+def _clean_caption_text(text: str) -> str:
+    """Strip caption noise: tags, speaker labels, non-speech markers, alignment codes."""
+    if not text:
+        return ""
+    # Strip HTML/XML tags
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Strip SSA/ASS style overrides like {\an8}
+    text = re.sub(r"\{\\[^}]+\}", " ", text)
+    # Strip bracketed non-speech events: [Music], [Applause], [Laughter], [ __ ] etc.
+    text = re.sub(r"\[[^\[\]]{1,40}\]", " ", text, flags=re.I)
+    # Strip ">>" speaker prefixes
+    text = re.sub(r"^[>\s-]+", " ", text)
+    # Collapse whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _dedup(segs: list[dict]) -> list[dict]:
+    """De-dupe rolling auto-captions (each line repeats the previous one)."""
     out: list[dict] = []
     for s in segs:
         if out and (s["text"] == out[-1]["text"] or out[-1]["text"].endswith(s["text"])):
             out[-1]["end"] = s["end"]; continue
         if out and s["text"].startswith(out[-1]["text"]):
-            s = {**s, "text": s["text"][len(out[-1]["text"]):].strip()}
-            if not s["text"]: continue
+            new_text = s["text"][len(out[-1]["text"]):].strip()
+            if not new_text:
+                out[-1]["end"] = s["end"]; continue
+            s = {**s, "text": new_text}
         out.append(s)
     return out
 
