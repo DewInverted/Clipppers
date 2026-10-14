@@ -103,7 +103,7 @@ class ClipIn(BaseModel):
     margin_v: int = 0             # 0 = use style default; else override bottom margin (px)
 
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 
 @app.get("/api/health")
@@ -593,7 +593,14 @@ def make_clip(body: ClipIn):
                 import traceback; traceback.print_exc()
                 print(f"[clipppers] filler removal skipped: {ferr}")
 
-        # Step 3: burn captions onto the (possibly filler-free) video
+        # Step 3: burn captions onto the (possibly filler-free) video.
+        # We always save the filler-free / cut-only footage as a separate
+        # "clean" MP4 so you have both: the edited raw video AND the
+        # captioned/bg/sfx version.
+        clean_path = os.path.join(CLIPS, f"clean_{tag}.mp4")
+        import shutil
+        shutil.copyfile(raw_path, clean_path)
+
         out = os.path.join(CLIPS, f"clip_{tag}.mp4")
         q = QUALITIES[body.quality]
         w, h = q["vertical"] if body.vertical else q["horizontal"]
@@ -604,8 +611,6 @@ def make_clip(body: ClipIn):
                       word_timings=word_timings,
                       font_size=body.font_size or None,
                       margin_v=body.margin_v or None)
-            # Burn captions onto raw_path using a simple re-encode with the
-            # subtitles filter (no more cutting — just render text).
             caption_burn_cmd = [
                 ffmpeg_bin(), "-y", "-i", raw_path,
                 "-vf", f"subtitles='{_esc_path(ass_path)}'",
@@ -616,17 +621,15 @@ def make_clip(body: ClipIn):
                 err = (r.stderr or "").strip().splitlines()[-1:]
                 raise RuntimeError(f"Caption burn failed: {err}")
         else:
-            import shutil
             shutil.copyfile(raw_path, out)
 
-        # ----- Generate preview thumbnail (captions already burned) -----
+        # ----- Generate preview thumbnail (from captioned version) -----
         thumb_name = f"thumb_{tag}.jpg"
         thumb_path = os.path.join(THUMBS, thumb_name)
         try:
             make_thumbnail(out, thumb_path, offset=min(1.0, (body.end - body.start) / 2))
             thumb_url = f"/api/thumbs/{thumb_name}"
         except Exception as thumb_err:
-            # thumbnail failure is non-fatal — clip still delivered, just no thumb
             thumb_url = None
             print(f"[clipppers] thumbnail failed: {thumb_err}")
 
@@ -634,10 +637,13 @@ def make_clip(body: ClipIn):
         resp = {
             "download": f"/api/clips/{os.path.basename(out)}",
             "file": os.path.basename(out),
+            "clean_download": f"/api/clips/{os.path.basename(clean_path)}",
+            "clean_file": os.path.basename(clean_path),
             "thumbnail": thumb_url,
             "quality": body.quality,
             "caption_style": body.caption_style,
             "size_kb": round(os.path.getsize(out) / 1024),
+            "clean_size_kb": round(os.path.getsize(clean_path) / 1024),
             "duration": round(clip_duration, 1),
             "fillers_removed": fillers_removed,
             "source_kind": source_kind,

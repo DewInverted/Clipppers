@@ -2,7 +2,7 @@ const $ = s => document.querySelector(s);
 let STATE = { moments: [], meta: {}, upload_id: "", url: "", edits: {} };
 let OPTIONS = {
   qualities: {"1080":"1080p · best quality","720":"720p · balanced (recommended)","480":"480p · small file, fast upload"},
-  caption_styles: {"none":"🚫 No burned-in captions","hormozi":"🟨 Hormozi — bold, word-by-word yellow highlight","mrbeast":"🔥 MrBeast — huge centred pop captions","karaoke":"🎤 Karaoke — word-by-word cyan sweep","neon":"💜 Neon Pop — magenta glow, centre screen","minimal":"⬜ Minimal — clean small white, bottom","cinematic":"🎬 Cinematic — elegant lower-third"}
+  caption_styles: {"none":"🚫 No burned-in captions","tiktok":"⚡ TikTok Bounce — one word at a time pop-in (Devin Jatho style)","hormozi":"🟨 Hormozi — bold, word-by-word yellow highlight","mrbeast":"🔥 MrBeast — huge centred pop captions","karaoke":"🎤 Karaoke — word-by-word cyan sweep","neon":"💜 Neon Pop — magenta glow, centre screen","minimal":"⬜ Minimal — clean small white, bottom","cinematic":"🎬 Cinematic — elegant lower-third"}
 };
 let LIBRARY = JSON.parse(localStorage.getItem("clipppers_library_v1") || "[]");
 
@@ -46,7 +46,7 @@ function getEdit(i){
   const x = STATE.moments[i];
   return STATE.edits[i] || (STATE.edits[i] = {
     start: x.start, end: x.end, title: x.title, caption: x.caption,
-    caption_style: "hormozi", quality: "720", vertical: true,
+    caption_style: "tiktok", quality: "720", vertical: true,
     crop_mode: "blur",
     caption_text_override: "",  // when set, burns THIS text instead of auto transcript
     font_size: 0, margin_v: 0,  // 0 = default per style
@@ -271,13 +271,14 @@ function renderMoments(){
 }
 
 function downloadHtml(e){
-  const dl = `<a class="dl" href="${esc(e.download)}" download>⬇ Download ${esc(e.file)}</a>`;
+  const dl = `<a class="dl" href="${esc(e.download)}" download>⬇ Download captioned edit</a>`;
+  const dlClean = e.clean_download ? ` <a class="dl dl-alt" href="${esc(e.clean_download)}" download style="color:var(--good);margin-left:10px">🎬 Download clean cut (no captions)</a>` : "";
   const ytLink = e.youtube_url ? `<a class="dl dl-alt" href="${esc(e.youtube_url)}" target="_blank" rel="noopener">🔗 Open at timestamp ↗</a>` : "";
   const cutInfo = (e.fillers_removed && e.fillers_removed>0) ? ` · ✂ cut ${e.fillers_removed.toFixed(1)}s fillers` : "";
-  const meta = `<span class="muted">${esc(e.quality)}p · ${esc(e.caption_style)} · ${e.size_kb} KB${cutInfo}</span>`;
+  const meta = `<span class="muted">${esc(e.quality)}p · ${esc(e.caption_style)} · captioned ${e.size_kb}KB${e.clean_size_kb?` · clean ${e.clean_size_kb}KB`:""}${cutInfo}</span>`;
   const player = `<div class="clip-player"><video src="${esc(e.download)}" controls preload="metadata" playsinline style="width:100%;border-radius:12px;background:#000"></video></div>`;
   return `<div class="clip-ready">
-    <div class="clip-ready-head">✅ Clip ready — ${dl}${ytLink?" · "+ytLink:""}<br>${meta}</div>
+    <div class="clip-ready-head">✅ Clip ready — ${dl}${dlClean}${ytLink?" · "+ytLink:""}<br>${meta}</div>
     ${e.thumbnail ? `<div class="clip-ready-thumb"><img src="${esc(e.thumbnail)}" alt="clip preview" loading="lazy"></div>` : ""}
     ${player}
   </div>`;
@@ -304,7 +305,8 @@ function preview(i){
       <p style="margin-top:10px;font-weight:700">This is your edited MP4 — ready to post to TikTok / Reels / Shorts.</p>
       <p class="muted">${e.vertical?"📱 9:16 vertical":"16:9"} · ${esc(e.quality)}p · 🎨 ${esc(e.caption_style)}${e.fillers_removed?` · ✂ ${e.fillers_removed}s of fillers cut`:""}</p>
       <p>
-        <a class="dl primary" href="${esc(e.download)}" download style="background:linear-gradient(90deg,#22c55e,#16a34a);color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:700;display:inline-block">⬇ Download MP4</a>
+        <a class="dl primary" href="${esc(e.download)}" download style="background:linear-gradient(90deg,#22c55e,#16a34a);color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:700;display:inline-block">⬇ Download captioned edit</a>
+        ${e.clean_download?`<a class="dl" href="${esc(e.clean_download)}" download style="background:#1a2a3a;border:1px solid #2a4a6a;color:#9cf;padding:10px 18px;border-radius:10px;font-weight:700;display:inline-block;margin-left:8px;text-decoration:none">🎬 Clean cut (no captions)</a>`:""}
         ${isYt?` <a class="dl dl-alt" href="${esc(ytUrl)}" target="_blank" rel="noopener" style="color:var(--muted);margin-left:10px">🔗 Source on YouTube ↗</a>`:""}
       </p>
       <p class="muted" style="font-size:12px;margin-top:8px">Not happy with it? Change caption style / framing / start/end in the clip card below and click ✂️ Export clip again — new render, new file.</p>
@@ -583,7 +585,7 @@ async function batchExportTop(n=3, btn){
   const payload = {
     url: STATE.url || STATE.meta.url || "",
     upload_id: STATE.upload_id,
-    quality: "720", caption_style: "hormozi",
+    quality: "720", caption_style: "tiktok",
     vertical: true, remove_fillers: fillers, crop_mode: cropMode,
     font_size: 0, margin_v: 0,
     clips: sorted.map(({x,i:idx})=>{
@@ -751,7 +753,7 @@ function buildManualControls(){
   const wrap = $("#manualQualityWrap");
   wrap.style.display = "flex";
   wrap.innerHTML = `
-    <label>🎨 Captions <select id="mStyle">${styleOpts("hormozi")}</select></label>
+    <label>🎨 Captions <select id="mStyle">${styleOpts("tiktok")}</select></label>
     <label>📦 Quality <select id="mQuality">${qualityOpts("720")}</select></label>
     <label class="caplabel" style="flex:1;min-width:220px">Caption text
       <input id="mCaptionText" type="text" placeholder="(auto-uses first transcript text if blank)" style="width:100%;margin-top:4px">
@@ -764,7 +766,7 @@ $("#manualBtn").onclick = e=>cutClip({
   start:+$("#mStart").value, end:+$("#mEnd").value,
   vertical:$("#mVertical").checked,
   quality:$("#mQuality")?.value||"720",
-  caption_style:$("#mStyle")?.value||"hormozi",
+  caption_style:$("#mStyle")?.value||"tiktok",
   caption_text:($("#mCaptionText")?.value||"") || (STATE.moments[0]?.transcript||""),
   remove_fillers: !!(document.getElementById("fillersToggle")?.checked),
   crop_mode: (document.getElementById("cropMode")?.value) || "blur"

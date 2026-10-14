@@ -7,7 +7,12 @@ sentence-level), chunked 2-4 words at a time like real short-form captions.
 from __future__ import annotations
 
 # name -> ffmpeg/ASS style definition
+# accent: list of words that get colored pop; accent_color: ASS color BGR for those
 STYLES = {
+    "tiktok":   dict(label="⚡ TikTok Bounce — one word at a time, pop-in (Devin Jatho style)", font="DejaVu Sans", bold=1,
+                     size=62, primary="&H00FFFFFF", highlight="&H0000E5FF", outline="&H00000000", back="&H00000000",
+                     border=8, shadow=0, align=2, margin_v=260, uppercase=True, word_by_word=True, chunk=1,
+                     pop=True),
     "hormozi":  dict(label="🟨 Hormozi — bold, word-by-word yellow highlight", font="DejaVu Sans", bold=1,
                      size=52, primary="&H00FFFFFF", highlight="&H0000E5FF", outline="&H00000000", back="&H00000000",
                      border=6, shadow=2, align=2, margin_v=220, uppercase=True, word_by_word=True, chunk=3),
@@ -27,6 +32,27 @@ STYLES = {
                      size=38, primary="&H00F5F5F5", highlight="&H00F5F5F5", outline="&H00000000", back="&H00000000",
                      border=2, shadow=1, align=1, margin_v=120, uppercase=False, word_by_word=False, chunk=6),
 }
+
+# Words that get colored accent in the 'tiktok' bounce style (money/negatives/
+# superlatives/power). Colours are ASS BGR: yellow = &H0000E5FF, red = &H000000FF,
+# cyan = &H00FFFF00, lime = &H0000FF66.
+ACCENT_WORDS = {
+    "&H0000E5FF": {"never","always","stop","secret","truth","lie","myth","biggest","worst","best",
+                   "crazy","insane","massive","huge","literally","actually","exactly"},
+    "&H000000FF": {"money","dollars","rich","broke","profit","revenue","scam","stupid","dangerous",
+                   "illegal","banned","destroyed","ruined","killed"},
+    "&H00FFFF00": {"you","your","yourself","you're","you'll","you've"},
+    "&H0000FF66": {"%","$","million","billion","thousand","dollars"},
+}
+
+def _accent_color(word: str) -> str:
+    w = word.lower().strip(".,!?;:\"'()")
+    for col, words in ACCENT_WORDS.items():
+        if w in words:
+            return col
+        if any(ch.isdigit() for ch in w) and col == "&H0000FF66":
+            return col
+    return "&H00FFFFFF"  # default white
 
 STYLE_CHOICES = ["none"] + list(STYLES)
 
@@ -95,19 +121,27 @@ def build_ass(text: str, duration: float, style_key: str, out_path: str,
             # Ensure no gap between groups is negative (start of this group must be >= end of last event)
             if events and g_start < events[-1][1] + 0.001:
                 g_start = events[-1][1] + 0.001
-            if st["word_by_word"]:
+            if st.get("word_by_word"):
                 for wi, (ws, we, w) in enumerate(group):
-                    # This word shows from its own start until the next word
-                    # starts (or we), with a small GAP at end of group.
                     if wi + 1 < len(group):
                         w_end = group[wi+1][0] - 0.005
                     else:
                         w_end = we
-                    w_dur = max(0.10, w_end - ws)
-                    shown = " ".join(
-                        (f"{{\\1c{st['highlight']}\\b1}}{gw}{{\\r}}" if j == wi else gw)
-                        for j, (_, _, gw) in enumerate(group))
-                    # Start slightly after previous word's end to avoid overlap
+                    # Bounce pop style: one word per frame, accent color, scale 1.6→1.0
+                    if st.get("pop"):
+                        w_dur = max(0.22, w_end - ws)
+                        col = _accent_color(w)
+                        pop_cs = 8  # 8 cs = 0.08s fast bounce
+                        # Start word at 150% scale then \tween down to 100% with
+                        # a slight overshoot (paccel=3 gives an ease-out bounce).
+                        pop_tag = (f"{{\\an5\\1c{col}\\b1\\bord8\\shad0\\fscx150\\fscy150"
+                                   f"\\t(0,{pop_cs},3,\\fscx100\\fscy100)}}")
+                        shown = pop_tag + w
+                    else:
+                        w_dur = max(0.10, w_end - ws)
+                        shown = " ".join(
+                            (f"{{\\1c{st['highlight']}\\b1}}{gw}{{\\r}}" if j == wi else gw)
+                            for j, (_, _, gw) in enumerate(group))
                     w_start = ws
                     if events and w_start < events[-1][1] + 0.001:
                         w_start = events[-1][1] + 0.001
