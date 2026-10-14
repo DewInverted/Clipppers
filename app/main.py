@@ -103,7 +103,7 @@ class ClipIn(BaseModel):
     margin_v: int = 0             # 0 = use style default; else override bottom margin (px)
 
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 
 @app.get("/api/health")
@@ -246,15 +246,22 @@ def discover(q: str = "", niche: str = "", count: int = 8):
     # ways depending on client cookie state, IP, and query phrasing, so try
     # several. The bug before was double-prefixing ytsearchN:ytsearchN:query
     # which always returned 0 results.
-    raw_q = re.sub(r"^ytsearch\d+:", "", query)  # strip any existing prefix
+    raw_q = re.sub(r"^ytsearch\w*\d*:", "", query)
+    # Build search strategies mixing regular videos AND Shorts, forcing video-only
+    # results (yt-dlp supports ytsearchvideos:N: and ytsearchshorts:N: prefixes which
+    # return only videos / only Shorts, skipping songs, channels, playlists, mixes).
+    n = max(3, min(int(count) + 3, 12))
+    ns = max(3, min(int(count) + 2, 8))
     strategies = [
-        f"ytsearch{n}:{raw_q}",
-        f"ytsearch{n}:{raw_q} shorts viral",
-        f"ytsearchdate{n}:{raw_q}",
-        f"ytsearch{n}:{raw_q} tips tutorial",
+        f"ytsearchshorts{ns}:{raw_q}",
+        f"ytsearchvideos{n}:{raw_q} viral",
+        f"ytsearchvideos{n}:{raw_q} tips",
+        f"ytsearchvideos{n}:{raw_q} tutorial",
+        f"ytsearchshorts{ns}:{raw_q} 2025",
     ]
     last_err = None
     info = None
+    used_entries: list = []
     for sq in strategies:
         try:
             cand = _run_ytdlp({
@@ -268,13 +275,42 @@ def discover(q: str = "", niche: str = "", count: int = 8):
                 "youtube_include_dash_manifest": False,
                 "youtube_include_hls_manifest": False,
             }, sq, download=False)
-            entries = (cand.get("entries") or []) if isinstance(cand, dict) else []
-            if entries:
-                info = cand
+            es = (cand.get("entries") or []) if isinstance(cand, dict) else []
+            # Filter to real videos only: must have an id, webpage_url, duration
+            # >5s, and NOT be a channel/playlist/mix/song entry. yt-dlp marks
+            # non-videos with ie_key like 'YoutubeChannel' or _type != 'url'.
+            for v in es:
+                if not v:
+                    continue
+                if v.get("_type") and v["_type"] != "url":
+                    continue
+                if v.get("ie_key") and v["ie_key"] not in ("Youtube", None):
+                    continue
+                vid = v.get("id") or v.get("display_id")
+                dur = v.get("duration")
+                if not vid or not dur or dur < 5:
+                    continue
+                title = (v.get("title") or "").lower()
+                # Skip music/song/album/playlist entries
+                if any(skip in title for skip in (" provided to youtube by", "official audio",
+                                                 "official music video", "lyrics",
+                                                 "topic -", " - topic", "full album")):
+                    continue
+                if v.get("channel_id") and v.get("channel_id","").startswith("UC") and any(
+                    m in title for m in (" song", " soundtrack", " official video", " audio)", "mix)")):
+                    continue
+                # Dedupe by video id
+                if any(u.get("id") == vid for u in used_entries):
+                    continue
+                used_entries.append(v)
+            if len(used_entries) >= int(count):
+                info = {"entries": used_entries}
                 break
         except YtDlpError as e:
             last_err = e
             continue
+    if used_entries and not info:
+        info = {"entries": used_entries}
     if not info:
         msg = str(last_err) if last_err else "No results from YouTube search."
         if "TLS" in msg or "SSL" in msg or "EOF" in msg or "403" in msg:
@@ -285,7 +321,8 @@ def discover(q: str = "", niche: str = "", count: int = 8):
                    "Details: " + msg[:160])
         return JSONResponse({"error": msg}, 502)
     entries = []
-    for v in (info.get("entries") or [] if isinstance(info, dict) else []) or []:
+    source_entries = (used_entries or ((info.get("entries") or []) if isinstance(info, dict) else []))
+    for v in source_entries:
         if not v:
             continue
         vid = v.get("id") or v.get("display_id")
