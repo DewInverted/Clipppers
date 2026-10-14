@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .analyzer import DEMO, analyze_transcript, parse_captions
+from .analyzer import DEMO, TOPICS, analyze_transcript, find_topic_clips, parse_captions, score_window, _hashtags, _title
 from .captions import STYLE_CHOICES, STYLES, build_ass
 from .clipper import FFMPEG_TIMEOUT, QUALITIES, cut, ffmpeg_bin, make_thumbnail, _short_path
 from .fillers import remove_fillers, estimate_word_segments
@@ -103,7 +103,7 @@ class ClipIn(BaseModel):
     margin_v: int = 0             # 0 = use style default; else override bottom margin (px)
 
 
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 
 
 @app.get("/api/health")
@@ -341,6 +341,90 @@ def discover(q: str = "", niche: str = "", count: int = 8):
             break
     return {"query": q or niche or "trending", "niche": niche or "custom", "videos": entries,
             "presets": {k: v for k, v in NICHE_PRESETS.items() if k != "trending"}}
+
+
+class ThemeIn(BaseModel):
+    url: str = ""
+    upload_id: str = ""
+    topic: str = "custom"       # key in TOPICS or 'custom'
+    query: str = ""             # free-text keywords
+    target_len: float = 25.0
+
+
+@app.get("/api/themes")
+def list_themes():
+    return {"themes": [{"id": k, "label": k} for k in TOPICS.keys()] + [{"id":"custom","label":"✨ Type your own…"}]}
+
+
+@app.post("/api/find-theme")
+def find_theme(body: ThemeIn):
+    """Scan the loaded video's transcript for moments matching a theme/topic.
+    Returns a list of themed clip candidates (ranked) ready to one-click add
+    to your moments list — each with a theme-matched edit recipe."""
+    cache_key = None
+    if body.upload_id:
+        cache_key = "upload:" + body.upload_id
+    elif body.url:
+        cache_key = "url:" + body.url
+    if not cache_key or cache_key not in SEG_CACHE or not SEG_CACHE[cache_key]:
+        return JSONResponse({"error": "Analyse a video first so we have a transcript to scan."}, 400)
+    segs = SEG_CACHE[cache_key]
+    raw_cands = find_topic_clips(segs, body.topic, body.query, body.target_len or 25.0)
+    out = []
+    for rank, c in enumerate(raw_cands, 1):
+        text = c["text"]
+        duration = round(c["end"] - c["start"], 1)
+        wpm = round(len(re.findall(r"[A-Za-z']+", text)) / max(0.5, duration) * 60)
+        topic = c["_topic"]
+        kw = (body.query or topic["label"]).split()[0] if (body.query or topic.get("label")) else ""
+        recipe = {
+            "bgm": topic["bgm"],
+            "sfx": [{"t":0.0,"type":"pop","note":"Hard cut on the keyword moment"}] + [
+                {"t":round(0.3+idx*0.25,2),"type":s,"note":s+" SFX on theme beat"}
+                for idx, s in enumerate(topic.get("sfx",[])[:2])
+            ],
+            "steps": [
+                "0.00s — Hard cut in right as the themed line starts; caption pops 1.2→1.0",
+                f"0.20s — 💥 Bold keyword flash ('{kw or topic['label']}') in accent color",
+                "0.60s — Slow Ken Burns push-in starts; captions 3 words at a time",
+                f"{round(max(1,duration-0.8),1)}s — 📍 End card CTA arrow fades in",
+            ],
+            "effects": [
+                "1.15→1.0 zoom punch on cut",
+                f"Keyword '{kw or topic['label']}' flashes accent color for 0.3s",
+                "Spotlight tightens on face at climax of the line",
+            ],
+            "text_overlays": [
+                f"Big theme tag '{topic['label']}' 0.2–0.8s at top",
+                "3-word karaoke captions (bold, 4px outline)",
+            ],
+            "hook_grade": "A",
+            "hook_line": text[:100],
+            "hook_rewrites": [
+                f"{(body.query or topic['label']).upper()} — here's the truth 👇",
+                f"Wait till you hear this about {(body.query or 'this')[:40]}…",
+            ],
+        }
+        score = min(99, c["topic_score"] + (10 if 130 <= wpm <= 185 else 0))
+        hook = {"score": min(99, c["topic_score"]+20), "grade": "A",
+                "text": text[:120], "strengths": c["topic_hits"][:3],
+                "rewrites": recipe["hook_rewrites"]}
+        out.append({
+            "rank": rank,
+            "start": c["start"], "end": c["end"],
+            "duration": duration,
+            "title": _title(text),
+            "score": score,
+            "label": c["label"],
+            "wpm": wpm,
+            "hook": hook,
+            "transcript": text,
+            "caption": f"{_title(text)} 🔥\n\n" + " ".join(_hashtags(text)),
+            "hashtags": _hashtags(text),
+            "why": [f"Matched theme: {hit}" for hit in c["topic_hits"][:3]],
+            "recipe": recipe,
+        })
+    return {"topic": body.topic, "query": body.query, "moments": out}
 
 
 def _compute_word_timings(body: ClipIn) -> list[tuple[float, float, str]] | None:

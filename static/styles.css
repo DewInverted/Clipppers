@@ -280,3 +280,13 @@ input:focus,select:focus,textarea:focus{outline:2px solid #ff4d6d66;border-color
 .recipe-p{margin:0 0 12px;font-size:13px;color:#dcd2ff;line-height:1.5}
 .recipe-list{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:#e0dcf0}
 .recipe-list li{margin-bottom:5px}
+
+/* theme finder */
+.theme-finder{background:linear-gradient(135deg,#0f1a2e,#15152e);border-color:#2a4a7a}
+.theme-finder summary{cursor:pointer;list-style:none;padding:6px 0}
+.theme-finder summary::-webkit-details-marker{display:none}
+.theme-chips{display:flex;gap:8px;flex-wrap:wrap}
+.theme-chip{border:1px solid var(--line);background:var(--card2);color:var(--mut);border-radius:99px;padding:8px 14px;font-size:13px;cursor:pointer;transition:all .15s}
+.theme-chip:hover{color:#fff;border-color:var(--acc)}
+.theme-chip.active{background:linear-gradient(90deg,#7a5cff,#4d9fff);color:#fff;border-color:transparent;font-weight:700}
+.theme-hit{background:#101020;border-left:3px solid #7a5cff;padding:10px 12px;border-radius:8px;margin:8px 0;font-size:14px}

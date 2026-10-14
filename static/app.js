@@ -657,8 +657,75 @@ $("#sortBy").onchange = renderMoments;
 $("#filterLabel").onchange = renderMoments;
 // Discover
 renderNicheChips();
+loadThemes();
 $("#discoverBtn").onclick = ()=>doDiscover("", $("#discoverQ").value.trim());
 $("#batchExportBtn").onclick = (e)=>batchExportTop(3, e.target);
+
+/* ------------------------------------------------ theme finder */
+let ACTIVE_THEME = "";
+async function loadThemes(){
+  try{
+    const r = await fetch("/api/themes"); const j = await r.json();
+    const wrap = $("#themeChips");
+    wrap.innerHTML = (j.themes||[]).map(t=>`<button class="theme-chip" data-id="${esc(t.id)}">${esc(t.label)}</button>`).join("");
+    wrap.querySelectorAll(".theme-chip").forEach(b=>{
+      b.onclick = ()=>{
+        wrap.querySelectorAll(".theme-chip").forEach(x=>x.classList.remove("active"));
+        if(ACTIVE_THEME===b.dataset.id){ ACTIVE_THEME=""; $("#themeQuery").value=""; return; }
+        b.classList.add("active"); ACTIVE_THEME = b.dataset.id;
+        if(b.dataset.id!=="custom") runTheme();
+      };
+    });
+  }catch(e){}
+}
+async function runTheme(){
+  const topic = ACTIVE_THEME || "custom";
+  const query = $("#themeQuery").value.trim();
+  if(topic==="custom" && !query){ $("#themeStatus").textContent="Type a keyword/phrase then click 🔎 Scan video"; return; }
+  if(!STATE.moments.length && !STATE.url){ $("#themeStatus").textContent="Analyse a video first"; return; }
+  $("#themeStatus").textContent="🔎 Scanning transcript for " + (topic==="custom"?query:topic) + "…";
+  $("#themeResults").innerHTML="";
+  try{
+    const r = await fetch("/api/find-theme",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({url:STATE.url||STATE.meta.url||"", upload_id:STATE.upload_id,
+                           topic, query, target_len:25})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||"Scan failed");
+    if(!d.moments?.length){ $("#themeStatus").textContent="No matching moments found — try a different keyword."; return; }
+    $("#themeStatus").innerHTML = `✅ Found <b>${d.moments.length}</b> ${esc(topic==="custom"?query:topic)} moments — <button class="ghost" id="addThemeMoments" style="padding:4px 10px">➕ Add all to my clips</button>`;
+    $("#themeResults").innerHTML = d.moments.map((m,idx)=>`
+      <div class="theme-hit">
+        <b>#${idx+1} · ${fmt(m.start)}→${fmt(m.end)} · ${m.duration}s</b> · score ${m.score}
+        <div style="margin:4px 0">${esc(m.transcript.slice(0,220))}${m.transcript.length>220?"…":""}</div>
+        <div class="row" style="margin-top:4px">
+          <button class="ghost" onclick="addThemeMoment(${idx})">➕ Add as clip</button>
+        </div>
+      </div>`).join("");
+    // store results so "Add as clip" can find them
+    STATE._themeResults = d.moments;
+    $("#addThemeMoments").onclick = ()=>{ d.moments.forEach((_,i)=>addThemeMoment(i)); };
+  }catch(e){ $("#themeStatus").textContent="⚠ " + e.message; }
+}
+function addThemeMoment(idx){
+  const m = STATE._themeResults?.[idx]; if(!m) return;
+  // Insert as a new moment at the correct timeline position
+  STATE.moments.push(m);
+  // Ensure getEdit initializes
+  const newIdx = STATE.moments.length - 1;
+  getEdit(newIdx);
+  // Re-sort by rank
+  STATE.moments.sort((a,b)=>a.start-b.start);
+  renderMoments();
+  toast(`➕ Added ${m.label} clip (${fmt(m.start)}→${fmt(m.end)})`);
+  // Scroll to it
+  setTimeout(()=>{
+    const realIdx = STATE.moments.indexOf(m);
+    const el = document.getElementById("moment-"+realIdx);
+    if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+  }, 150);
+}
+$("#themeSearchBtn").onclick = ()=>{ ACTIVE_THEME="custom"; runTheme(); };
+$("#themeQuery").addEventListener("keydown", e=>{ if(e.key==="Enter"){ ACTIVE_THEME="custom"; runTheme(); }});
 $("#discoverQ").addEventListener("keydown", e=>{ if(e.key==="Enter") doDiscover("", $("#discoverQ").value.trim()); });
 $("#discoverList").innerHTML = `<div class="muted" style="padding:14px">Pick a niche above or type a topic + click 🔍 Find videos to load popular clips from that space.</div>`;
 $("#modalClose").onclick = closeModal;

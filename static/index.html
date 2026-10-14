@@ -99,6 +99,22 @@
     <div class="legend"><span>Score:</span><i class="dot hot"></i> 85+ viral potential <i class="dot good"></i> 65+ strong <i class="dot ok"></i> 45+ decent</div>
 
     <h2>🏆 Key moments <small id="momentCount"></small></h2>
+
+    <details class="card theme-finder" id="themeFinder" style="margin-top:4px">
+      <summary><b>🔍 Find moments by vibe/topic</b> <span class="muted">— scan the whole video for harsh truths, funny bits, motivation, money moments, answers…</span></summary>
+      <div style="margin-top:12px">
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <div id="themeChips" class="theme-chips"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <input id="themeQuery" type="text" placeholder="✨ Or type your own: e.g. 'when he roasts the audience', 'shocking stat', 'how to start'…" style="flex:1;min-width:240px">
+          <button class="primary" id="themeSearchBtn">🔎 Scan video</button>
+        </div>
+        <div id="themeStatus" class="muted" style="margin-top:8px"></div>
+        <div id="themeResults" style="margin-top:12px"></div>
+      </div>
+    </details>
+
     <div class="row options">
       <label>Sort
         <select id="sortBy"><option value="rank">Virality score</option><option value="time">Timeline order</option><option value="hook">Hook strength</option></select>

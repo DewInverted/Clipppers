@@ -45,9 +45,160 @@ LABELS = [
     ("Controversy", r"\b(cancel|banned|illegal|scam|lie|lying|exposed|controversial)\b"),
 ]
 
+# Topic → keyword sets for the "find me every moment about X" scanner.
+# Each entry maps a theme label to (keywords regex, bonus score, bgm, recipe flavor).
+TOPICS = {
+    "Harsh reality / hard truth": {
+        "kw": r"\b(nobody|truth is|hard truth|harsh reality|the real|no one tells you|wake up|you need to hear|let'?s be real|brutally honest|reality check)\b",
+        "emotion_boost": ["hard","tough","brutal","honest","reality","truth","lie","myth","fake"],
+        "label": "Hot Take",
+        "bgm": "Tense drone riser → impact drop (controversy bed)",
+        "sfx": ["impact","record_scratch","riser"],
+    },
+    "Funny moment": {
+        "kw": r"(\[laughter\]|\(laughter\)|haha|lol|🤣|😂|\bfunny\b|\bjoke[sd]?\b|\blaughed\b)",
+        "emotion_boost": ["funny","hilarious","laugh","joke","ridiculous","stupid","crazy","wild"],
+        "label": "Funny",
+        "bgm": "Cartoon boing / playful ukulele bed",
+        "sfx": ["pop","whoosh"],
+    },
+    "Motivational speech": {
+        "kw": r"\b(you can|never give up|keep going|wake up|grind|hustle|believe in yourself|you are capable|rise up|push through|don'?t quit)\b",
+        "emotion_boost": ["believe","dream","grind","hustle","strong","power","capable","destined","great"],
+        "label": "Story",
+        "bgm": "Epic cinematic orchestral build (Inception-style brass + strings)",
+        "sfx": ["impact","whoosh"],
+    },
+    "Money / numbers / results": {
+        "kw": r"(\$\d|\b\d{2,}\s?(k|m|million|billion|percent|%|dollars)\b|\bmoney\b|\bprofit\b|\brevenue\b|\bi (made|earned|spent|lost)\b)",
+        "emotion_boost": ["money","cash","profit","revenue","rich","broke","debt","income","dollars"],
+        "label": "Money",
+        "bgm": "Hard-money trap (dark bells + 808)",
+        "sfx": ["pop","whoosh","impact"],
+    },
+    "Step-by-step / how-to / answer": {
+        "kw": r"\b(step (one|two|three|1|2|3)|first you|here'?s how|the (method|framework|formula|secret)|number (one|two)|how (to|i|you))\b",
+        "emotion_boost": ["step","framework","method","system","how","formula","secret","tip","trick"],
+        "label": "Insight",
+        "bgm": "Minimal lo-fi beat (90 BPM) ducked under voice",
+        "sfx": ["pop","ding"],
+    },
+    "Hot take / controversial": {
+        "kw": r"\b(unpopular opinion|everyone is wrong|stop believing|change my mind|here'?s the thing|i'?ll get hate|controversial|cancel(led)?)\b",
+        "emotion_boost": ["wrong","hate","cancel","controversial","opinion","disagree","myth","lie"],
+        "label": "Controversy",
+        "bgm": "Tense drone + 808 drop on reveal",
+        "sfx": ["record_scratch","impact","riser"],
+    },
+    "Story / personal anecdote": {
+        "kw": r"\b(when i was|one day|years ago|i remember|turns out|long story|i found out|i had no idea)\b",
+        "emotion_boost": ["remember","story","happened","realized","finally","suddenly"],
+        "label": "Story",
+        "bgm": "Cinematic piano pad, swells at climax",
+        "sfx": ["reveal"],
+    },
+    "Question / hook opener": {
+        "kw": r"\b(do you (ever|know|want)|have you (ever|wondered)|what if|why do (you|we)|how (do|can|would) you)\b\?",
+        "emotion_boost": ["why","how","what","when","ever","wonder"],
+        "label": "Key Moment",
+        "bgm": "Riser → silence → beat drop on answer",
+        "sfx": ["riser","pop"],
+    },
+}
+
 
 def _words(t: str) -> list[str]:
     return re.findall(r"[a-z0-9'$%]+", t.lower())
+
+
+def score_topic_match(text: str, topic: dict) -> tuple[int, list[str]]:
+    """Score how strongly a piece of text matches a topic dict. Returns (score, hits)."""
+    low = text.lower()
+    hits = []
+    score = 0
+    if re.search(topic["kw"], low):
+        m = re.search(topic["kw"], low)
+        hits.append(f'keyword: "{m.group(0)[:40]}"')
+        score += 30
+    for w in topic.get("emotion_boost", []):
+        c = len(re.findall(r"\b" + re.escape(w) + r"\b", low))
+        if c:
+            score += c * 4
+            hits.append(f"{c}× {w}")
+    if "?" in low: score += 3
+    if "!" in low: score += 3
+    if any(x in low for x in ("should","must","need to")): score += 4
+    return score, hits
+
+
+def find_topic_clips(segments: list[dict], topic_key: str, query: str = "",
+                    target_len: float = 30.0) -> list[dict]:
+    """Scan all segments and return ranked clips focused on a topic/theme.
+
+    topic_key: key into TOPICS dict (or 'custom' to use free-text query)
+    query: free-text keywords (used when topic_key=='custom' or to boost)
+    """
+    if topic_key == "custom" and query.strip():
+        # Build an ad-hoc topic from the user's query words
+        qw = [w for w in _words(query) if len(w) > 2 and w not in STOPWORDS][:8]
+        topic = {
+            "kw": r"\b(" + "|".join(re.escape(w) for w in qw) + r")\b",
+            "emotion_boost": qw,
+            "label": "Custom",
+            "bgm": "Modern trending TikTok audio (dark Phonk or Jersey Club)",
+            "sfx": ["pop","whoosh","impact"],
+        }
+    elif topic_key in TOPICS:
+        topic = TOPICS[topic_key]
+    else:
+        return []
+
+    # Slide a window over segments, keeping the ones that score high for the topic.
+    candidates = []
+    for i, seg in enumerate(segments):
+        window, j = [seg], i
+        while j + 1 < len(segments) and (window[-1]["end"] - seg["start"]) < target_len + 5:
+            j += 1; window.append(segments[j])
+        if window[-1]["end"] - seg["start"] < 6:
+            continue
+        text = " ".join(s["text"] for s in window)
+        sc, hits = score_topic_match(text, topic)
+        if sc < 8:
+            continue
+        # find the exact sentence(s) with the strongest match for tighter cuts
+        sentences = re.split(r"(?<=[.?!])\s+", text)
+        # find peak sentence
+        peak_idx = 0; peak_sc = 0
+        for si, sent in enumerate(sentences):
+            s_sc, _ = score_topic_match(sent, topic)
+            if s_sc > peak_sc:
+                peak_sc = s_sc; peak_idx = si
+        # build window around peak sentence of ~target_len
+        start_s = max(0, sum(s[1] for s in [(len(sent.split())/2.6, sent) for sent in sentences[:max(0,peak_idx-1)]]))
+        # simpler: just use the segment window scored; for the first pass we
+        # trust the window we already have.
+        candidates.append({
+            "start": round(seg["start"], 1),
+            "end": round(window[-1]["end"], 1),
+            "text": text[:3000],
+            "topic_score": sc,
+            "topic_hits": hits[:5],
+            "label": topic["label"],
+            "_topic": topic,
+        })
+    # Non-max suppression and rank
+    candidates.sort(key=lambda c: -c["topic_score"])
+    kept = []
+    for c in candidates:
+        if all(min(c["end"],k["end"]) - max(c["start"],k["start"]) <
+               0.5 * min(c["end"]-c["start"], k["end"]-k["start"]) for k in kept):
+            kept.append(c)
+        if len(kept) >= 8:
+            break
+    return kept[:8]
+
+
+
 
 
 def hook_analysis(text: str) -> dict:
