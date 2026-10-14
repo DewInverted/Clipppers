@@ -1,29 +1,16 @@
-# Clipppers v1.5.1 — Cross-platform export
+# Clipppers v1.5.2 — Bug-fix: Suggestions work, Instagram/TikTok download fixed
 
-New in this release: render clips sized correctly for every platform you post to.
-
-## New
-- **📲 Platform presets** (dropdown per clip + manual cutter + batch):
-  - 📱 TikTok (9:16 · 1080×1920)
-  - ▶️ YouTube Shorts (9:16)
-  - 📸 Instagram Reels (9:16)
-  - ⭕ Instagram / Facebook Stories (9:16)
-  - ⬜ Instagram feed square (1:1 · 1080×1080)
-  - 📸 Instagram feed portrait (4:5 · 864×1080)
-  - 📺 YouTube long-form / horizontal (16:9 · 1920×1080)
-  - ▬ Twitter / X / Facebook horizontal (16:9)
-- **Platform-safe caption zones** — captions automatically push up above each app's bottom UI chrome (TikTok/Shorts/Reels have the largest margins, landscape YouTube has a small lower-third margin).
-- **🔊 Audio loudness normalization (-14 LUFS)** applied to both the clean cut and the captioned export so your clips hit platform loudness targets without extra post.
-- Framing filters generalized: blur/crop/fit now work for any aspect ratio (not just 9:16). Pick horizontal 16:9 and the crop-blur framing + bounce captions still behave correctly.
-- Platform badge shown on each clip card and in the post-export modal so you can see at a glance what size was rendered.
+This release fixes real-world issues reported right after v1.5.1.
 
 ## Fixes
-- Caption burn and cut pipeline both apply loudnorm now (clean path + captioned path both normalized).
-- Quality tiers (480p/720p/1080p) scale the long side correctly for square, 4:5 and 16:9 canvases.
-- Manual cutter platform select auto-toggles vertical/horizontal.
+- **🔥 Suggested / Discover videos no longer crash.** The previous code tried to use `ytsearchshorts{N}:` which is **not** a real yt-dlp URL prefix — it threw `Unsupported url scheme: "ytsearchshorts8"`. yt-dlp only supports `ytsearchN:` (and `ytsearchdateN:` on some builds), so we now use standard `ytsearchN:` queries with varied query phrasing (`… viral`, `… #shorts`, `… tips`, `… 2025`) and still filter Shorts/songs/channels/playlists out of results.
+- **📸 Instagram Reels / TikTok / Twitch etc downloads fixed.** We were accidentally injecting YouTube-specific extractor args (`player_client=tv_simply,android,web`, `player_skip=webpage,js,configs`, DASH/HLS manifest flags) into **every** yt-dlp call regardless of host, which confused non-YouTube extractors. Those are now only applied to YouTube URLs. Also switched to an iPhone Safari UA that Instagram serves public Reels to without login, and loosened the format selector to accept muxed MP4 (many non-YouTube hosts don't expose separate m4a audio tracks).
+- **Reference videos**: the two Shorts links you sent (`l9S0OyxXojI`, `NPobjvv2zrs`) were only used as visual/style study for the bounce-caption look; they were never embedded, linked, or shipped in Clipppers. I confirmed neither ID appears anywhere in the app code — the bounce is implemented natively in ASS (`{\fscx150\fscy150\t(0,80ms,3,\fscx100\fscy100)}`) rather than clipping/importing any external footage.
+- Server version bump → 1.5.2.
 
-## From v1.5.0
-- **⚡ TikTok Bounce captions** (default): one huge word dead-center, pops from 150% → 100% with overshoot, 8px black outline, power-word coloring (yellow = pattern-interrupts, red = money/danger, cyan = "you/your", lime = numbers/percent/dollar).
-- **Dual MP4 output** — every export produces `clean_{tag}.mp4` (filler-free, framed, no captions) + `clip_{tag}.mp4` (same video with bounce captions burned). Two download buttons in every card.
+## Cross-platform export (from v1.5.1, retained)
+- TikTok / YouTube Shorts / IG Reels / Stories / IG feed 1:1 / IG 4:5 / YouTube 16:9 / Twitter+FB.
+- Platform-safe caption safe-zones, -14 LUFS loudnorm, generalized blur/crop/fit framing.
+- Dual MP4 output (clean cut + captioned bounce edit).
 
 Unzip, run `run.bat` (Windows) or `./run.sh` (Mac/Linux), open http://localhost:8000.

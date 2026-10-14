@@ -67,6 +67,17 @@ def _run_ytdlp(params: dict, url: str, *, download: bool = True):
         def warning(self, msg): err_buf.write(msg + "\n")
         def error(self, msg): err_buf.write(msg + "\n")
 
+    # YouTube-only extractor args (do NOT pass these for IG/TikTok/Twitch/etc
+    # — they cause extractor failures or wrong-client errors). Detect by URL.
+    yt_only = {}
+    if bool(re.search(r"(youtube\.com|youtu\.be)", url or "")):
+        yt_only = {
+            "extractor_args": {"youtube": {"player_client": ["tv_simply", "android", "web"],
+                                           "player_skip": ["webpage", "js", "configs"]}},
+            "youtube_include_dash_manifest": False,
+            "youtube_include_hls_manifest": False,
+        }
+
     base = {
         "quiet": True, "no_warnings": False, "noprogress": True,
         "socket_timeout": 30, "retries": 2, "fragment_retries": 2,
@@ -76,16 +87,13 @@ def _run_ytdlp(params: dict, url: str, *, download: bool = True):
         "ffmpeg_location": _ffmpeg_location(),
         # Browser UA so YouTube search/metadata doesn't 403 or TLS-fail
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                          "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                          "Mobile/15E148 Safari/604.1",
             "Accept-Language": "en-US,en;q=0.9",
         },
-        "extractor_args": {"youtube": {"player_client": ["tv_simply", "android", "web"],
-                                        "player_skip": ["webpage", "js", "configs"]}},
-        "youtube_include_dash_manifest": False,
-        "youtube_include_hls_manifest": False,
     }
-    params = {**base, **params, "logger": _Logger()}
+    params = {**base, **yt_only, **params, "logger": _Logger()}
 
     try:
         with yt_dlp.YoutubeDL(params) as ydl:
@@ -279,13 +287,23 @@ def download_section(url: str, start: float, end: float, vertical: bool, out_dir
 
         # Try a few format strings in order: strict-ish to anything-goes.
         # Some videos only expose muxed formats, some are Shorts/age-gated,
-        # some don't have <=1080p separate video+audio streams.
-        fmt_attempts = [
-            "(bv*[height<=?1080][ext=mp4]+ba[ext=m4a])/b[height<=?1080][ext=mp4]/(bv*[height<=?1080]+ba/b[height<=?1080])",
-            "(bv*[height<=?720][ext=mp4]+ba[ext=m4a])/b[height<=?720][ext=mp4]/(bv*[height<=?720]+ba/b[height<=?720])",
-            "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
-            "best/bestvideo+bestaudio/worst",
-        ]
+        # some (IG Reels, TikTok) don't have separate m4a audio.
+        is_yt = bool(re.search(r"(youtube\.com|youtu\.be)", url or ""))
+        if is_yt:
+            fmt_attempts = [
+                "(bv*[height<=?1080][ext=mp4]+ba[ext=m4a])/b[height<=?1080][ext=mp4]/(bv*[height<=?1080]+ba/b[height<=?1080])",
+                "(bv*[height<=?720][ext=mp4]+ba[ext=m4a])/b[height<=?720][ext=mp4]/(bv*[height<=?720]+ba/b[height<=?720])",
+                "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
+                "best/bestvideo+bestaudio/worst",
+            ]
+        else:
+            # Non-YouTube (IG/TikTok/Twitch/etc): be permissive — accept any muxed format.
+            fmt_attempts = [
+                "bv*[height<=?1080][ext=mp4]+ba/b[height<=?1080][ext=mp4]/b[height<=?1080]",
+                "bv*[height<=?720][ext=mp4]+ba/b[height<=?720][ext=mp4]/b[height<=?720]",
+                "best[ext=mp4]/best",
+                "best/bestvideo+bestaudio/worst",
+            ]
         last_err = None
         info = None
         for fmt in fmt_attempts:

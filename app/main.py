@@ -104,7 +104,7 @@ class ClipIn(BaseModel):
     platform: str = "tiktok"      # tiktok | shorts | reels | story | ig_square | ig_portrait | youtube | horizontal
 
 
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 
 @app.get("/api/health")
@@ -243,22 +243,18 @@ def discover(q: str = "", niche: str = "", count: int = 8):
     if not query:
         query = NICHE_PRESETS["trending"]
     n = max(3, min(int(count) + 3, 12))
-    # Multiple search strategies: yt-dlp can be blocked by YouTube in different
-    # ways depending on client cookie state, IP, and query phrasing, so try
-    # several. The bug before was double-prefixing ytsearchN:ytsearchN:query
-    # which always returned 0 results.
+    # Note: yt-dlp only supports ytsearch[N]: / ytsearchdate[N]: prefixes (no
+    # "ytsearchshorts" / "ytsearchvideos" — those aren't real and fail with
+    # "Unsupported url scheme: ytsearchshortsN"). We run regular ytsearch and
+    # filter Shorts vs long-form on the results by looking for /shorts/ URLs
+    # and aspect ratio metadata.
     raw_q = re.sub(r"^ytsearch\w*\d*:", "", query)
-    # Build search strategies mixing regular videos AND Shorts, forcing video-only
-    # results (yt-dlp supports ytsearchvideos:N: and ytsearchshorts:N: prefixes which
-    # return only videos / only Shorts, skipping songs, channels, playlists, mixes).
-    n = max(3, min(int(count) + 3, 12))
-    ns = max(3, min(int(count) + 2, 8))
     strategies = [
-        f"ytsearchshorts{ns}:{raw_q}",
-        f"ytsearchvideos{n}:{raw_q} viral",
-        f"ytsearchvideos{n}:{raw_q} tips",
-        f"ytsearchvideos{n}:{raw_q} tutorial",
-        f"ytsearchshorts{ns}:{raw_q} 2025",
+        f"ytsearch{n}:{raw_q}",
+        f"ytsearch{n}:{raw_q} viral",
+        f"ytsearch{n}:{raw_q} #shorts",
+        f"ytsearch{n}:{raw_q} tips",
+        f"ytsearch{n}:{raw_q} 2025",
     ]
     last_err = None
     info = None
