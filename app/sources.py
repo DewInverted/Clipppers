@@ -270,7 +270,8 @@ def fetch_link(url: str) -> dict:
 
 def download_section(url: str, start: float, end: float, vertical: bool, out_dir: str,
                      quality: str = "720", caption_ass: str | None = None,
-                     crop_mode: str = "blur", out_tag: str | None = None) -> str:
+                     crop_mode: str = "blur", out_tag: str | None = None,
+                     platform: str = "tiktok") -> str:
     from .clipper import cut
     import time as _time
     with tempfile.TemporaryDirectory(dir=WORK) as td:
@@ -329,5 +330,6 @@ def download_section(url: str, start: float, end: float, vertical: bool, out_dir
         src_file = files[0]
         tag = out_tag or f"yt_{int(start)}_{int(end)}_{'v' if vertical else 'h'}_{quality}"
         out = os.path.join(out_dir, f"{tag}.mp4")
-        cut(src_file, start, end, out, vertical, quality, caption_ass=caption_ass, crop_mode=crop_mode)
+        cut(src_file, start, end, out, vertical, quality, caption_ass=caption_ass,
+            crop_mode=crop_mode, platform=platform)
         return out

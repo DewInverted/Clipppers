@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from .analyzer import DEMO, TOPICS, analyze_transcript, find_topic_clips, parse_captions, score_window, _hashtags, _title
 from .captions import STYLE_CHOICES, STYLES, build_ass
-from .clipper import FFMPEG_TIMEOUT, QUALITIES, cut, ffmpeg_bin, make_thumbnail, _short_path
+from .clipper import FFMPEG_TIMEOUT, PLATFORM_CAPTION_MARGIN, PLATFORM_LUFS, QUALITIES, _res, cut, ffmpeg_bin, make_thumbnail, _short_path
 from .fillers import remove_fillers, estimate_word_segments
 from .projects import ProjectStore
 from .sources import WORK, download_section, fetch_link, is_youtube, youtube_id, youtube_thumbnail_url, youtube_timestamp_url, _run_ytdlp, YtDlpError, _import_ytdlp
@@ -101,9 +101,10 @@ class ClipIn(BaseModel):
     crop_mode: str = "blur"       # blur (default) | crop — vertical framing style
     font_size: int = 0            # 0 = use style default; else override font size (px on 1280 canvas)
     margin_v: int = 0             # 0 = use style default; else override bottom margin (px)
+    platform: str = "tiktok"      # tiktok | shorts | reels | story | ig_square | ig_portrait | youtube | horizontal
 
 
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 
 @app.get("/api/health")
@@ -528,12 +529,12 @@ def make_clip(body: ClipIn):
         # splicing video after burning captions desyncs them from audio).
         if body.upload_id and body.upload_id in UPLOAD_MAP:
             cut(UPLOAD_MAP[body.upload_id], body.start, body.end, raw_path, body.vertical,
-                body.quality, caption_ass=None, crop_mode=crop_mode)
+                body.quality, caption_ass=None, crop_mode=crop_mode, platform=body.platform)
             source_kind = "upload"
         elif body.url:
             raw_path = download_section(body.url, body.start, body.end, body.vertical, CLIPS,
                                         body.quality, caption_ass=None, crop_mode=crop_mode,
-                                        out_tag=f"raw_{tag}")
+                                        out_tag=f"raw_{tag}", platform=body.platform)
             source_kind = "url"
         else:
             return JSONResponse({"error": "No video source for that clip."}, 400)
@@ -602,20 +603,27 @@ def make_clip(body: ClipIn):
         shutil.copyfile(raw_path, clean_path)
 
         out = os.path.join(CLIPS, f"clip_{tag}.mp4")
-        q = QUALITIES[body.quality]
-        w, h = q["vertical"] if body.vertical else q["horizontal"]
+        w, h = _res(body.platform, body.quality)
+        q_crf = {"1080":18,"720":21,"480":24}.get(body.quality, 21)
+        # Platform-safe caption margin override (clipped to canvas)
+        safe_margin = PLATFORM_CAPTION_MARGIN.get(body.platform, 260)
+        # Scale margin_v for non-1280 canvas heights (default margin_v is defined at 1280h)
+        scaled_margin = int(safe_margin * h / 1280)
+        eff_margin_v = body.margin_v or scaled_margin
         if body.caption_style != "none":
             ass_path = os.path.join(CLIPS, f"cap_{tag}.ass")
             caption_words = " ".join(t[2] for t in word_timings) if word_timings else body.caption_text
             build_ass(caption_words, clip_duration, body.caption_style, ass_path, w, h,
                       word_timings=word_timings,
                       font_size=body.font_size or None,
-                      margin_v=body.margin_v or None)
+                      margin_v=eff_margin_v)
             caption_burn_cmd = [
                 ffmpeg_bin(), "-y", "-i", raw_path,
                 "-vf", f"subtitles='{_esc_path(ass_path)}'",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", str(q["crf"]),
-                "-c:a", "copy", "-movflags", "+faststart", out]
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", str(q_crf),
+                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+                "-af", f"loudnorm=I={PLATFORM_LUFS.get(body.platform,-14)}:TP=-1.5:LRA=11",
+                out]
             r = subprocess.run(caption_burn_cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
             if r.returncode != 0 or not os.path.exists(out) or os.path.getsize(out) < 1024:
                 err = (r.stderr or "").strip().splitlines()[-1:]
@@ -642,6 +650,7 @@ def make_clip(body: ClipIn):
             "thumbnail": thumb_url,
             "quality": body.quality,
             "caption_style": body.caption_style,
+            "platform": body.platform,
             "size_kb": round(os.path.getsize(out) / 1024),
             "clean_size_kb": round(os.path.getsize(clean_path) / 1024),
             "duration": round(clip_duration, 1),
@@ -670,6 +679,7 @@ class BatchIn(BaseModel):
     crop_mode: str = "blur"
     font_size: int = 0
     margin_v: int = 0
+    platform: str = "tiktok"
 
 
 @app.post("/api/clip/batch")
@@ -688,6 +698,7 @@ def batch_clip(body: BatchIn):
                 caption_text=str(c.get("caption_text") or ""),
                 remove_fillers=c.get("remove_fillers", body.remove_fillers),
                 crop_mode=c.get("crop_mode", body.crop_mode),
+                platform=c.get("platform", body.platform),
                 font_size=int(c.get("font_size", body.font_size) or 0),
                 margin_v=int(c.get("margin_v", body.margin_v) or 0),
             )

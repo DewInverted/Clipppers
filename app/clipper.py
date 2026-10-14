@@ -1,14 +1,76 @@
-"""Real clip cutting with ffmpeg (binary bundled via imageio-ffmpeg — no system install)."""
+"""Real clip cutting with ffmpeg (binary bundled via imageio-ffmpeg — no system install).
+
+Platform aspect ratios (all padded into standard H.264 dimensions):
+  tiktok / shorts / reels  → 9:16  (1080x1920) — TikTok, YT Shorts, IG Reels
+  ig_square                → 1:1   (1080x1080) — Instagram feed square
+  ig_portrait              → 4:5   (1080x1350) — Instagram feed portrait
+  youtube / twitter / fb   → 16:9  (1920x1080) — YouTube long-form, Twitter/X, FB
+  story                    → 9:16  (1080x1920) — IG/FB Stories (same as shorts)
+
+Captions are positioned with platform-specific bottom-margin so they don't
+get covered by UI chrome (TikTok caption box, IG reply bar, YouTube title).
+"""
 from __future__ import annotations
 
 import os
 import re
 import subprocess
 
+# (w, h) per platform at 1080 tier; 720/480 scale proportionally.
+ASPECTS = {
+    "tiktok":    (1080, 1920),   # 9:16
+    "shorts":    (1080, 1920),   # 9:16 (YT Shorts = same as TikTok)
+    "reels":     (1080, 1920),   # 9:16 (IG Reels = same)
+    "story":     (1080, 1920),   # 9:16 (IG/FB Stories)
+    "ig_square": (1080, 1080),   # 1:1 IG feed square
+    "ig_portrait":(864, 1080),   # 4:5 IG feed portrait
+    "youtube":   (1920, 1080),   # 16:9 YouTube long-form
+    "horizontal":(1920, 1080),   # alias 16:9
+}
+
+# Safe-zone bottom-margin (pixels at 1280 canvas height) — how far from the
+# bottom edge captions must sit to avoid platform UI chrome. Values are tuned
+# to where each app puts its caption/like/comment bar.
+PLATFORM_CAPTION_MARGIN = {
+    "tiktok":      320,  # TikTok has caption/UI in bottom ~25%; push captions up
+    "shorts":      280,  # YT Shorts bottom UI slightly smaller
+    "reels":       300,  # IG Reels
+    "story":       260,  # IG/FB Stories
+    "ig_square":   140,  # square feed, generous
+    "ig_portrait": 200,  # IG portrait feed
+    "youtube":     120,  # landscape, lower third
+    "horizontal":  120,
+}
+
 QUALITIES = {
-    "1080": dict(vertical=(1080, 1920), horizontal=(1920, 1080), crf=18, label="1080p · best quality"),
-    "720":  dict(vertical=(720, 1280),  horizontal=(1280, 720),  crf=21, label="720p · balanced (recommended)"),
-    "480":  dict(vertical=(480, 854),   horizontal=(854, 480),   crf=24, label="480p · small file, fast upload"),
+    "1080": dict(label="1080p · best quality"),
+    "720":  dict(label="720p · balanced (recommended)"),
+    "480":  dict(label="480p · small file, fast upload"),
+}
+
+# Resolve (w,h) per quality tier + platform. For non-1080 tiers, scale the
+# native 1080p canvas so its longer side matches the tier (720 or 480).
+def _res(platform: str, quality: str) -> tuple[int, int]:
+    pw, ph = ASPECTS.get(platform, ASPECTS["tiktok"])
+    q = quality if quality in QUALITIES else "720"
+    if q == "1080":
+        return (pw, ph)
+    long_side = 720 if q == "720" else 480
+    native_long = max(pw, ph)
+    return (round(pw * long_side / native_long), round(ph * long_side / native_long))
+    return (pw * 480 // (ph if pw >= ph else pw), ph * 480 // (ph if pw >= ph else pw))
+
+# Target integrated loudness per platform (LUFS). ffmpeg loudnorm is used to
+# hit these so clips don't sound quiet vs. the platform norm.
+PLATFORM_LUFS = {
+    "tiktok":      -14,
+    "shorts":      -14,
+    "reels":       -14,   # IG/FB ~-14 LUFS
+    "story":       -14,
+    "ig_square":   -14,
+    "ig_portrait": -14,
+    "youtube":     -14,
+    "horizontal":  -14,
 }
 
 FFMPEG_TIMEOUT = 900
@@ -43,30 +105,28 @@ def ffmpeg_bin() -> str:
         return "ffmpeg"
 
 
-def _build_filter(w: int, h: int, vertical: bool, crop_mode: str,
-                  caption_ass: str | None, start: float, end: float) -> str:
-    """Build a single filter_complex graph that:
-      1. trims [0:v] and [0:a] to [start..end] and resets PTS to 0
-         (so all downstream filters see clip-relative time = 0 at clip start)
-      2. applies vertical/horizontal framing
-      3. burns in subtitles (which now see correct 0-based timestamps)
-    This is THE fix for captions appearing on a completely different part
-    of the video: the subtitles filter must run after PTS reset.
-    """
-    dur = max(0.1, end - start)
+def _build_filter(w: int, h: int, crop_mode: str,
+                  caption_ass: str | None, start: float, end: float,
+                  lufs: float = -14.0):
+    """Build filter_complex: trim+PTS reset, framing to exact w/h, audio loudnorm, optional subs."""
     parts = []
-    # 1) Trim + reset PTS
+    # Target aspect as a rational expression for ffmpeg crop eval
+    target_ar = f"{w}/{h}"
+    # 1) Trim + reset PTS + audio loudnorm (broadcast -14 LUFS)
     parts.append(
         f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS,fps=30,setsar=1[vt];"
-        f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[at];"
+        f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS,"
+        f"loudnorm=I={lufs}:TP=-1:LRA=11[at];"
     )
-    # 2) Framing on [vt] -> [vframed]
-    if vertical and crop_mode == "crop":
+    # 2) Framing [vt] -> [vframed]
+    if crop_mode == "crop":
+        # crop to exact target aspect first, then scale
         parts.append(
-            f"[vt]crop='if(gt(iw/ih,9/16),ih*9/16,iw)':'if(gt(iw/ih,9/16),ih,iw*16/9)',"
+            f"[vt]crop='if(gt(iw/ih,{target_ar}),ih*{target_ar},iw)':"
+            f"'if(gt(iw/ih,{target_ar}),ih,iw/({target_ar}))',"
             f"scale={w}:{h}:flags=lanczos,setsar=1[vframed];"
         )
-    elif vertical:  # blur (default)
+    elif crop_mode == "blur":
         parts.append(
             f"[vt]split=2[bg][fg];"
             f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,"
@@ -74,7 +134,7 @@ def _build_filter(w: int, h: int, vertical: bool, crop_mode: str,
             f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease,setsar=1[fgfit];"
             f"[bgblur][fgfit]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1[vframed];"
         )
-    else:
+    else:  # fit with black bars
         parts.append(
             f"[vt]scale={w}:{h}:force_original_aspect_ratio=decrease,"
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1[vframed];"
@@ -91,27 +151,21 @@ def _build_filter(w: int, h: int, vertical: bool, crop_mode: str,
 
 def cut(src: str, start: float, end: float, out: str, vertical: bool = True,
         quality: str = "720", caption_ass: str | None = None,
-        crop_mode: str = "blur") -> str:
-    q = QUALITIES.get(quality, QUALITIES["720"])
-    w, h = q["vertical"] if vertical else q["horizontal"]
+        crop_mode: str = "blur", platform: str = "tiktok") -> str:
+    # platform drives canvas dimensions; `vertical` kept for backward compat but ignored
+    w, h = _res(platform, quality)
+    crf = {"1080": 18, "720": 21, "480": 24}.get(quality, 21)
+    lufs = PLATFORM_LUFS.get(platform, -14)
     dur = max(1.0, end - start)
-
-    src_s = _short_path(src)
-    out_s = _short_path(out)
-
-    filter_complex, vmap = _build_filter(w, h, vertical, crop_mode, caption_ass, start, end)
-
-    # IMPORTANT: do NOT pass -ss/-t with -vf when using trim/atrim in the filter
-    # graph, and do NOT put -ss before -i. We map the labelled pads and use -t
-    # as a safety cap. trim+setpts is what gives frame-accurate cuts with PTS
-    # starting at 0, so the subtitles filter renders at the right time.
+    src_s = _short_path(src); out_s = _short_path(out)
+    filter_complex, vmap = _build_filter(w, h, crop_mode, caption_ass, start, end, lufs=lufs)
     cmd = [ffmpeg_bin(), "-y", "-i", src_s,
            "-filter_complex", filter_complex,
            "-map", vmap, "-map", "[at]",
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", str(q["crf"]),
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
            "-avoid_negative_ts", "make_zero",
-           "-t", f"{dur + 0.1:.3f}", out_s]
+           "-t", f"{dur+0.1:.3f}", out_s]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
     except subprocess.TimeoutExpired:

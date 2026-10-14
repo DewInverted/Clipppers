@@ -42,14 +42,27 @@ function portraitThumb(src, alt){
 }
 
 /* ---------------------------------------------------------- persistence */
+const PLATFORMS = [
+  {id:"tiktok",      label:"📱 TikTok"},
+  {id:"shorts",      label:"▶️ YouTube Shorts"},
+  {id:"reels",       label:"📸 IG Reels"},
+  {id:"story",       label:"⭕ IG/Facebook Stories"},
+  {id:"ig_portrait", label:"🖼 IG feed (4:5 portrait)"},
+  {id:"ig_square",   label:"⬛ IG feed (1:1 square)"},
+  {id:"youtube",     label:"📺 YouTube long-form (16:9)"},
+  {id:"horizontal",  label:"▬ Twitter / X / FB (16:9)"},
+];
+function platformOpts(sel){ return PLATFORMS.map(p=>`<option value="${p.id}"${p.id===sel?" selected":""}>${esc(p.label)}</option>`).join(""); }
+const PLATFORM_BADGE = {tiktok:"📱TikTok 9:16",shorts:"▶️Shorts 9:16",reels:"📸Reels 9:16",story:"⭕Story 9:16",ig_square:"⬜IG 1:1",ig_portrait:"📸IG 4:5",youtube:"📺YouTube 16:9",horizontal:"▬16:9"};
+function platformBadge(id){ return PLATFORM_BADGE[id]||id; }
 function getEdit(i){
   const x = STATE.moments[i];
   return STATE.edits[i] || (STATE.edits[i] = {
     start: x.start, end: x.end, title: x.title, caption: x.caption,
     caption_style: "tiktok", quality: "720", vertical: true,
-    crop_mode: "blur",
-    caption_text_override: "",  // when set, burns THIS text instead of auto transcript
-    font_size: 0, margin_v: 0,  // 0 = default per style
+    crop_mode: "blur", platform: "tiktok",
+    caption_text_override: "",
+    font_size: 0, margin_v: 0,
     download: "", file: "", thumbnail: "", youtube_url: "" });
 }
 function capTextFor(e, x){ return (e.caption_text_override && e.caption_text_override.trim()) ? e.caption_text_override.trim() : (x.transcript||""); }
@@ -228,8 +241,13 @@ function renderMoments(){
         <label class="check"><input type="checkbox" ${e.vertical?"checked":""} onchange="editField(${i},'vertical',this.checked)"> 9:16 vertical</label>
       </div>
       <div class="row">
-        <label>🎨 Caption style <select onchange="editField(${i},'caption_style',this.value)">${styleOpts(e.caption_style)}</select></label>
+        <label>🎨 Captions <select onchange="editField(${i},'caption_style',this.value)">${styleOpts(e.caption_style)}</select></label>
         <label>📦 Export quality <select onchange="editField(${i},'quality',this.value)">${qualityOpts(e.quality)}</select></label>
+        <label>📲 Platform
+          <select onchange="editField(${i},'platform',this.value);editField(${i},'vertical',(this.value!=='youtube'&&this.value!=='horizontal'));renderMoments()">
+            ${platformOpts(e.platform||"tiktok")}
+          </select>
+        </label>
         <label>📐 Framing
           <select onchange="editField(${i},'crop_mode',this.value)">
             <option value="blur"${e.crop_mode==='blur'?' selected':''}>🫧 Blurred background</option>
@@ -275,7 +293,7 @@ function downloadHtml(e){
   const dlClean = e.clean_download ? ` <a class="dl dl-alt" href="${esc(e.clean_download)}" download style="color:var(--good);margin-left:10px">🎬 Download clean cut (no captions)</a>` : "";
   const ytLink = e.youtube_url ? `<a class="dl dl-alt" href="${esc(e.youtube_url)}" target="_blank" rel="noopener">🔗 Open at timestamp ↗</a>` : "";
   const cutInfo = (e.fillers_removed && e.fillers_removed>0) ? ` · ✂ cut ${e.fillers_removed.toFixed(1)}s fillers` : "";
-  const meta = `<span class="muted">${esc(e.quality)}p · ${esc(e.caption_style)} · captioned ${e.size_kb}KB${e.clean_size_kb?` · clean ${e.clean_size_kb}KB`:""}${cutInfo}</span>`;
+  const meta = `<span class="muted">${platformBadge(e.platform||"tiktok")} · ${esc(e.quality)}p · ${esc(e.caption_style)} · captioned ${e.size_kb}KB${e.clean_size_kb?` · clean ${e.clean_size_kb}KB`:""}${cutInfo}</span>`;
   const player = `<div class="clip-player"><video src="${esc(e.download)}" controls preload="metadata" playsinline style="width:100%;border-radius:12px;background:#000"></video></div>`;
   return `<div class="clip-ready">
     <div class="clip-ready-head">✅ Clip ready — ${dl}${dlClean}${ytLink?" · "+ytLink:""}<br>${meta}</div>
@@ -395,6 +413,7 @@ async function makeClip(i, btn){
     start:+e.start, end:+e.end, vertical:!!e.vertical, quality:e.quality,
     caption_style:e.caption_style, caption_text: capTextFor(e, x),
     remove_fillers: fillers, crop_mode: e.crop_mode || "blur",
+    platform: e.platform||"tiktok",
     font_size: e.font_size||0, margin_v: e.margin_v||0 }, btn, $("#clipout-"+i));
   if(data){
     Object.assign(e, {download:data.download, file:data.file,
@@ -586,13 +605,14 @@ async function batchExportTop(n=3, btn){
     url: STATE.url || STATE.meta.url || "",
     upload_id: STATE.upload_id,
     quality: "720", caption_style: "tiktok",
-    vertical: true, remove_fillers: fillers, crop_mode: cropMode,
+    vertical: true, remove_fillers: fillers, crop_mode: cropMode, platform: "tiktok",
     font_size: 0, margin_v: 0,
     clips: sorted.map(({x,i:idx})=>{
       const ed = getEdit(idx);
       return {start:+ed.start, end:+ed.end, caption_text: capTextFor(ed, x), title:ed.title||x.title,
               caption_style:ed.caption_style, quality:ed.quality, vertical:!!ed.vertical,
               crop_mode:ed.crop_mode||cropMode, remove_fillers:fillers,
+              platform: ed.platform||"tiktok",
               font_size:ed.font_size||0, margin_v:ed.margin_v||0};
     })
   };
@@ -760,11 +780,16 @@ function buildManualControls(){
     </label>`;
 }
 buildManualControls();
+{ const mp = $("#mPlatform"); if(mp) {
+  mp.innerHTML = platformOpts("tiktok");
+  mp.onchange = () => { $("#mVertical").checked = !(mp.value==="youtube"||mp.value==="horizontal"); };
+} }
 $("#manualBtn").onclick = e=>cutClip({
   url: STATE.url || STATE.meta.url || "",
   upload_id: STATE.upload_id,
   start:+$("#mStart").value, end:+$("#mEnd").value,
   vertical:$("#mVertical").checked,
+  platform:$("#mPlatform")?.value||"tiktok",
   quality:$("#mQuality")?.value||"720",
   caption_style:$("#mStyle")?.value||"tiktok",
   caption_text:($("#mCaptionText")?.value||"") || (STATE.moments[0]?.transcript||""),
